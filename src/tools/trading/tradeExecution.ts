@@ -30,7 +30,7 @@ import { getQuantoMultiplier } from "../../utils/contractUtils";
 
 const logger = createPinoLogger({
   name: "trade-execution",
-  level: "info",
+  level: (process.env.LOG_LEVEL || "info") as any,
 });
 
 const dbClient = createClient({
@@ -185,14 +185,22 @@ export const openPositionTool = createTool({
       // 低流动性时段警告（UTC 2:00-6:00，亚洲时段凌晨）
       if (hourUTC >= 2 && hourUTC <= 6) {
         logger.warn(`⚠️  当前处于低流动性时段 (UTC ${hourUTC}:00)，建议谨慎交易`);
-        // 在低流动性时段降低仓位
-        amountUsdt = Math.max(10, amountUsdt * 0.7);
+        // 在低流动性时段降低仓位（仅缩减，不会抬高下单保证金）
+        const reducedAmount = Math.min(amountUsdt, Math.max(2, amountUsdt * 0.7));
+        if (reducedAmount < amountUsdt) {
+          logger.info(`低流动性自动降档：保证金 ${amountUsdt.toFixed(2)} → ${reducedAmount.toFixed(2)} USDT`);
+          amountUsdt = reducedAmount;
+        }
       }
       
       // 周末流动性检查
       if ((dayOfWeek === 5 && hourUTC >= 22) || dayOfWeek === 6 || (dayOfWeek === 0 && hourUTC < 20)) {
         logger.warn(`⚠️  当前处于周末时段，流动性可能较低`);
-        amountUsdt = Math.max(10, amountUsdt * 0.8);
+        const weekendAmount = Math.min(amountUsdt, Math.max(3, amountUsdt * 0.8));
+        if (weekendAmount < amountUsdt) {
+          logger.info(`周末自动降档：保证金 ${amountUsdt.toFixed(2)} → ${weekendAmount.toFixed(2)} USDT`);
+          amountUsdt = weekendAmount;
+        }
       }
       
       // 2. 检查订单簿深度（确保有足够流动性）
@@ -277,7 +285,8 @@ export const openPositionTool = createTool({
       if (volatilityLevel === "high") {
         const adjustment = strategyParams.volatilityAdjustment.highVolatility;
         adjustedLeverage = Math.max(1, Math.round(leverage * adjustment.leverageFactor));
-        adjustedAmountUsdt = Math.max(10, amountUsdt * adjustment.positionFactor);
+        const targetMargin = Math.min(amountUsdt, Math.max(3, amountUsdt * adjustment.positionFactor));
+        adjustedAmountUsdt = targetMargin;
         logger.info(`🌊 高波动市场 (ATR ${atrPercent.toFixed(2)}%)：杠杆 ${leverage}x → ${adjustedLeverage}x，仓位 ${amountUsdt.toFixed(0)} → ${adjustedAmountUsdt.toFixed(0)} USDT`);
       } else if (volatilityLevel === "low") {
         const adjustment = strategyParams.volatilityAdjustment.lowVolatility;
@@ -288,10 +297,32 @@ export const openPositionTool = createTool({
         logger.info(`🌊 正常波动市场 (ATR ${atrPercent.toFixed(2)}%)：保持原始参数`);
       }
       
+      // 根据账户可用资金再次校准保证金（保留一定缓冲防止撮合失败）
+      const reserveBuffer = Math.max(0.5, availableBalance * 0.05);
+      const affordableMargin = Math.max(0, availableBalance - reserveBuffer);
+      if (affordableMargin <= 0) {
+        return {
+          success: false,
+          message: `可用资金 ${availableBalance.toFixed(2)} USDT 已被占用，无法为新仓位预留保证金，请先释放资金。`,
+        };
+      }
+      if (adjustedAmountUsdt > affordableMargin) {
+        logger.warn(`根据可用资金 ${availableBalance.toFixed(2)} USDT，自动将开仓保证金从 ${adjustedAmountUsdt.toFixed(2)} 调整为 ${affordableMargin.toFixed(2)} USDT`);
+        adjustedAmountUsdt = affordableMargin;
+      }
+      if (adjustedAmountUsdt < 2) {
+        return {
+          success: false,
+          message: `调整后的保证金仅 ${adjustedAmountUsdt.toFixed(2)} USDT，低于系统允许的最小开仓资金，请等待资金恢复或降低杠杆。`,
+        };
+      }
+      
       // ====== 风控检查通过，继续开仓 ======
       
       // 设置杠杆（使用调整后的杠杆）
       await client.setLeverage(contract, adjustedLeverage);
+      const effectiveLeverage = Math.max(1, adjustedLeverage);
+      const effectiveAmountUsdt = adjustedAmountUsdt;
       
       // 获取当前价格和合约信息
       const ticker = await client.getFuturesTicker(contract);
@@ -309,9 +340,9 @@ export const openPositionTool = createTool({
       const maxSize = Number.parseInt(contractInfo.orderSizeMax || "1000000");
       
       // 计算可以开多少张合约
-      // adjustedAmountUsdt = (quantity * quantoMultiplier * currentPrice) / leverage
-      // => quantity = (adjustedAmountUsdt * leverage) / (quantoMultiplier * currentPrice)
-      let quantity = (adjustedAmountUsdt * leverage) / (quantoMultiplier * currentPrice);
+      // effectiveAmountUsdt = (quantity * quantoMultiplier * currentPrice) / effectiveLeverage
+      // => quantity = (effectiveAmountUsdt * effectiveLeverage) / (quantoMultiplier * currentPrice)
+      let quantity = (effectiveAmountUsdt * effectiveLeverage) / (quantoMultiplier * currentPrice);
       
       // 向下取整到整数张数（合约必须是整数）
       quantity = Math.floor(quantity);
@@ -324,17 +355,17 @@ export const openPositionTool = createTool({
       
       // 最后验证：如果 size 为 0 或者太小，放弃开仓
       if (Math.abs(size) < minSize) {
-        const minMargin = (minSize * quantoMultiplier * currentPrice) / leverage;
+        const minMargin = (minSize * quantoMultiplier * currentPrice) / effectiveLeverage;
         return {
           success: false,
-          message: `计算的数量 ${Math.abs(size)} 张小于最小限制 ${minSize} 张，需要至少 ${minMargin.toFixed(2)} USDT 保证金（当前${adjustedAmountUsdt.toFixed(2)} USDT，杠杆${leverage}x）`,
+          message: `计算的数量 ${Math.abs(size)} 张小于最小限制 ${minSize} 张，需要至少 ${minMargin.toFixed(2)} USDT 保证金（当前${effectiveAmountUsdt.toFixed(2)} USDT，杠杆${effectiveLeverage}x）`,
         };
       }
       
       // 计算实际使用的保证金
-      let actualMargin = (Math.abs(size) * quantoMultiplier * currentPrice) / leverage;
+      let actualMargin = (Math.abs(size) * quantoMultiplier * currentPrice) / effectiveLeverage;
       
-      logger.info(`开仓 ${symbol} ${side === "long" ? "做多" : "做空"} ${Math.abs(size)}张 (杠杆${leverage}x)`);
+      logger.info(`开仓 ${symbol} ${side === "long" ? "做多" : "做空"} ${Math.abs(size)}张 (杠杆${effectiveLeverage}x)`);
       
       //  市价单开仓（不设置止盈止损）
       const order = await client.placeOrder({
@@ -448,7 +479,7 @@ export const openPositionTool = createTool({
           "open",
           actualFillPrice, // 使用实际成交价格
           finalQuantity,   // 使用实际成交数量
-          leverage,
+          effectiveLeverage,
           fee,            // 手续费
           getChinaTimeISO(),
           dbStatus,
@@ -500,8 +531,8 @@ export const openPositionTool = createTool({
       // 如果未能从 Gate.io 获取强平价，使用估算公式（仅作为后备）
       if (liquidationPrice === 0) {
         liquidationPrice = side === "long" 
-          ? actualFillPrice * (1 - 0.9 / leverage)
-          : actualFillPrice * (1 + 0.9 / leverage);
+          ? actualFillPrice * (1 - 0.9 / effectiveLeverage)
+          : actualFillPrice * (1 + 0.9 / effectiveLeverage);
         logger.warn(`使用估算强平价: ${liquidationPrice}`);
       }
         
@@ -525,7 +556,7 @@ export const openPositionTool = createTool({
             actualFillPrice,
             liquidationPrice,
             0,
-            leverage,
+            effectiveLeverage,
             side,
             takeProfit || null,
             stopLoss || null,
@@ -549,7 +580,7 @@ export const openPositionTool = createTool({
             actualFillPrice,
             liquidationPrice,
             0,
-            leverage,
+            effectiveLeverage,
             side,
             takeProfit || null,
             stopLoss || null,
@@ -572,9 +603,9 @@ export const openPositionTool = createTool({
         size: Math.abs(size), // 合约张数
         contractAmount, // 实际币的数量
         price: actualFillPrice,
-        leverage,
+        leverage: effectiveLeverage,
         actualMargin,
-        message: `✅ 成功开仓 ${symbol} ${side === "long" ? "做多" : "做空"} ${Math.abs(size)} 张 (${contractAmount.toFixed(4)} ${symbol})，成交价 ${actualFillPrice.toFixed(2)}，保证金 ${actualMargin.toFixed(2)} USDT，杠杆 ${leverage}x。⚠️ 未设置止盈止损，请在每个周期主动决策是否平仓。`,
+        message: `✅ 成功开仓 ${symbol} ${side === "long" ? "做多" : "做空"} ${Math.abs(size)} 张 (${contractAmount.toFixed(4)} ${symbol})，成交价 ${actualFillPrice.toFixed(2)}，保证金 ${actualMargin.toFixed(2)} USDT，杠杆 ${effectiveLeverage}x。⚠️ 未设置止盈止损，请在每个周期主动决策是否平仓。`,
       };
     } catch (error: any) {
       return {
@@ -611,7 +642,22 @@ export const closePositionTool = createTool({
       
       //  直接从 Gate.io 获取最新的持仓信息（不依赖数据库）
       const allPositions = await client.getPositions();
-      const gatePosition = allPositions.find((p: any) => p.contract === contract);
+      //logger.debug(`closePosition 获取持仓:`, allPositions.map((p: any) => ({ contract: p.contract, size: p.size })));
+      const normalizeContract = (value: string) =>
+        (value || "").replace(/[_\s\-/]/g, "").toUpperCase();
+
+      const positionSummaries = allPositions.slice(0, 10).map((p: any) =>
+        `${p.contract}:${p.size}`,
+      );
+      logger.debug(`closePosition 当前持仓摘要: ${positionSummaries.join(", ")}`);
+
+      const targetContract = normalizeContract(contract);
+
+      const gatePosition = allPositions.find((p: any) => {
+        const candidate = normalizeContract(p.contract || "");
+        const rawSize = Number.parseFloat(p.size || "0");
+        return candidate === targetContract && Math.abs(rawSize) > 0;
+      });
       
       if (!gatePosition || Number.parseInt(gatePosition.size || "0") === 0) {
         return {
@@ -745,7 +791,13 @@ export const closePositionTool = createTool({
             break;
             
           } catch (error: any) {
-            retryCount++;
+            const message = error?.message || "";
+            if (message.includes("-2013")) {
+              logger.info("订单已在交易所归档（-2013），使用预估成交信息。");
+              retryCount = maxRetries; // 触发下方的预估逻辑
+            } else {
+              retryCount++;
+            }
             if (retryCount >= maxRetries) {
               logger.error(`获取平仓订单详情失败（重试${retryCount}次）: ${error.message}`);
               // 如果无法获取订单详情，使用预估值

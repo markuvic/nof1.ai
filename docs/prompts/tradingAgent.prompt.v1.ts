@@ -115,9 +115,9 @@ export function getStrategyParams(strategy: TradingStrategy): StrategyParams {
   const conservativeLevGood = Math.ceil((conservativeLevMin + conservativeLevMax) / 2);
   const conservativeLevStrong = conservativeLevMax;
   
-  // 平衡策略：40%-70% 的最大杠杆（降低杠杆以减少短期波动影响）
-  const balancedLevMin = Math.max(2, Math.ceil(maxLeverage * 0.4));
-  const balancedLevMax = Math.max(3, Math.ceil(maxLeverage * 0.7));
+  // 平衡策略：60%-85% 的最大杠杆
+  const balancedLevMin = Math.max(2, Math.ceil(maxLeverage * 0.6));
+  const balancedLevMax = Math.max(3, Math.ceil(maxLeverage * 0.85));
   const balancedLevNormal = balancedLevMin;
   const balancedLevGood = Math.ceil((balancedLevMin + balancedLevMax) / 2);
   const balancedLevStrong = balancedLevMax;
@@ -185,40 +185,40 @@ export function getStrategyParams(strategy: TradingStrategy): StrategyParams {
         good: `${balancedLevGood}倍`,
         strong: `${balancedLevStrong}倍`,
       },
-      positionSizeMin: 18,
-      positionSizeMax: 24,
+      positionSizeMin: 20,
+      positionSizeMax: 27,
       positionSizeRecommend: {
         normal: "20-23%",
         good: "23-25%",
         strong: "25-27%",
       },
       stopLoss: {
-        low: -4.5,
-        mid: -4,
-        high: -3.3,
+        low: -3,
+        mid: -2.5,
+        high: -2,
       },
       trailingStop: {
-        // 平衡策略：适中的移动止盈（基准：8-10倍杠杆）
+        // 平衡策略：适中的移动止盈（基准：15倍杠杆）
         // 注意：这些是基准值，实际使用时会根据杠杆动态调整
-        level1: { trigger: 6, stopAt: 2 },   // 基准：盈利达到 +6% 时，止损线移至 +2%
-        level2: { trigger: 10, stopAt: 5 },  // 基准：盈利达到 +10% 时，止损线移至 +5%
-        level3: { trigger: 16, stopAt: 10 }, // 基准：盈利达到 +16% 时，止损线移至 +10%
+        level1: { trigger: 8, stopAt: 3 },   // 基准：盈利达到 +8% 时，止损线移至 +3%
+        level2: { trigger: 15, stopAt: 8 },  // 基准：盈利达到 +15% 时，止损线移至 +8%
+        level3: { trigger: 25, stopAt: 15 }, // 基准：盈利达到 +25% 时，止损线移至 +15%
       },
       partialTakeProfit: {
-        // 平衡策略：标准分批止盈（更贴近费用与波动）
-        stage1: { trigger: 12, closePercent: 40 },  // +12% 平仓40%
-        stage2: { trigger: 18, closePercent: 40 },  // +18% 平仓剩余40%
-        stage3: { trigger: 25, closePercent: 100 }, // +25% 全部清仓
+        // 平衡策略：标准分批止盈
+        stage1: { trigger: 30, closePercent: 50 },  // +30% 平仓50%
+        stage2: { trigger: 40, closePercent: 50 },  // +40% 平仓剩余50%
+        stage3: { trigger: 50, closePercent: 100 }, // +50% 全部清仓
       },
-      peakDrawdownProtection: 22, // 平衡策略：22%峰值回撤保护（更早保护利润）
+      peakDrawdownProtection: 30, // 平衡策略：30%峰值回撤保护（标准平衡点）
       volatilityAdjustment: {
-        highVolatility: { leverageFactor: 0.6, positionFactor: 0.75 },   // 高波动：进一步降低
-        normalVolatility: { leverageFactor: 0.9, positionFactor: 0.95 }, // 正常波动：保持略低杠杆
-        lowVolatility: { leverageFactor: 1.0, positionFactor: 1.0 },    // 低波动：仅在低波动时恢复基准
+        highVolatility: { leverageFactor: 0.7, positionFactor: 0.8 },   // 高波动：适度降低
+        normalVolatility: { leverageFactor: 1.0, positionFactor: 1.0 }, // 正常波动：不调整
+        lowVolatility: { leverageFactor: 1.1, positionFactor: 1.0 },    // 低波动：略微提高杠杆
       },
-      entryCondition: "至少3个关键时间框架信号一致，并得到成交量/ATR 共振支持",
+      entryCondition: "至少2个关键时间框架信号一致，3个或更多更佳",
       riskTolerance: "单笔交易风险控制在20-27%之间，平衡风险与收益",
-      tradingStyle: "在风险可控前提下耐心等待高胜率机会，追求稳健增长",
+      tradingStyle: "在风险可控前提下积极把握机会，追求稳健增长",
     },
     "aggressive": {
       name: "激进",
@@ -335,21 +335,15 @@ export function generateTradingPrompt(data: {
 │ 峰值回撤：≥${params.peakDrawdownProtection}% → 危险信号，立即平仓 │
 └─────────────────────────────────────────┘
 
-【交易节奏控制】
-┌─────────────────────────────────────────┐
-│ 同一币种方向性操作之间至少间隔 3 个执行周期 │
-│ 若无 ≥3 个时间框架共振或 ATR>阈值信号，可直接观望 │
-└─────────────────────────────────────────┘
-
 【决策流程 - 按优先级执行】
 (1) 持仓管理（最优先）：
-   检查每个持仓的止损/止盈/峰值回撤 → 仅在达到触发条件时调用 closePosition
+   检查每个持仓的止损/止盈/峰值回撤 → closePosition
    
 (2) 新开仓评估：
-   分析市场数据 → 识别双向机会（做多/做空） → 满足策略信号与风控后再调用 openPosition
+   分析市场数据 → 识别双向机会（做多/做空） → openPosition
    
 (3) 加仓评估：
-   盈利>5%且趋势强化 → 同步确认风控与冷静期（至少间隔3个执行周期）后再考虑 openPosition（≤50%原仓位，相同或更低杠杆）
+   盈利>5%且趋势强化 → openPosition（≤50%原仓位，相同或更低杠杆）
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -361,12 +355,12 @@ export function generateTradingPrompt(data: {
 • 历史交易记录（最近10笔）
 
 【您的任务】
-直接基于上述数据做出交易评估：
-1. 先分析持仓管理需求（止损/止盈/加仓）；只有当触发条件明确时才调用 closePosition / openPosition。
-2. 识别新交易机会（做多/做空）；若信号不足，可明确说明“保持观望”，无需强制下单。
-3. 每次计划开仓或显著加仓前先调用 calculateRisk，确认盈亏比≥2:1 且费用后仍有价值。
+直接基于上述数据做出交易决策，无需重复获取数据：
+1. 分析持仓管理需求（止损/止盈/加仓）→ 调用 closePosition / openPosition 执行
+2. 识别新交易机会（做多/做空）→ 调用 openPosition 执行
+3. 评估风险和仓位管理 → 调用 calculateRisk 验证
 
-重点：当策略信号不够充分时，可以保持观望并记录理由；避免为满足流程而勉强交易。
+关键：您必须实际调用工具执行决策，不要只停留在分析阶段！
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -638,12 +632,11 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
    - **防止对冲风险**：双向持仓会导致资金锁定、双倍手续费和额外风险
    - **执行顺序**：趋势反转时 → 先执行 closePosition 平掉原仓位 → 再执行 openPosition 开新方向
    - **加仓机制（风险倍增，谨慎执行）**：对于已有持仓的币种，如果趋势强化且局势有利，**允许加仓**：
-      * **加仓条件**（全部满足才可加仓）：
-        - 持仓方向正确且已盈利（pnl_percent > 5%，必须有足够利润缓冲）
-        - 趋势强化：至少3个时间框架继续共振，信号强度增强
-        - 账户可用余额充足，加仓后总持仓不超过风控限制
-        - 加仓后该币种的总名义敞口不超过账户净值的${params.leverageMax}倍
-        - 距离上一次对该币种执行方向性操作已过去≥3个执行周期
+     * **加仓条件**（全部满足才可加仓）：
+       - 持仓方向正确且已盈利（pnl_percent > 5%，必须有足够利润缓冲）
+       - 趋势强化：至少3个时间框架继续共振，信号强度增强
+       - 账户可用余额充足，加仓后总持仓不超过风控限制
+       - 加仓后该币种的总名义敞口不超过账户净值的${params.leverageMax}倍
      * **加仓策略（专业风控要求）**：
        - 单次加仓金额不超过原仓位的50%
        - 最多加仓2次（即一个币种最多3个批次）
@@ -652,12 +645,12 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
 4. **双向交易机会（重要提醒）**：
    - **做多机会**：当市场呈现上涨趋势时，开多单获利
    - **做空机会**：当市场呈现下跌趋势时，开空单同样能获利
-   - **关键认知**：先评估信号质量；至少3个时间框架共振、ATR 与成交量同步支持后才考虑交易
-   - **市场是双向的**：连续多个周期空仓可能正常，只需记录观望理由，避免为满足流程而强行交易
-   - 永续合约做空没有借币成本，但仍需关注资金费率与仓位冷静期
+   - **关键认知**：下跌中做空和上涨中做多同样能赚钱，不要只盯着做多机会
+   - **市场是双向的**：如果连续多个周期空仓，很可能是忽视了做空机会
+   - 永续合约做空没有借币成本，只需关注资金费率即可
 5. **多时间框架分析**：您分析多个时间框架（15分钟、30分钟、1小时、4小时）的模式，以识别高概率入场点。${params.entryCondition}。
 6. **仓位管理（${params.name}策略）**：${params.riskTolerance}。最多同时持有${RISK_PARAMS.MAX_POSITIONS}个持仓。
-7. **交易频率**：${params.tradingStyle}；若无高置信度信号，应明确记录“保持观望”
+7. **交易频率**：${params.tradingStyle}
 8. **杠杆的合理运用（${params.name}策略）**：您必须使用${params.leverageMin}-${params.leverageMax}倍杠杆，根据信号强度灵活选择：
    - 普通信号：${params.leverageRecommend.normal}
    - 良好信号：${params.leverageRecommend.good}
@@ -684,7 +677,6 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
   * 36小时 = ${Math.floor(36 * 60 / intervalMinutes)}个执行周期
   * 您无法实时监控价格波动，必须设置保守的止损和止盈
   * 在${intervalMinutes}分钟内市场可能剧烈波动，因此杠杆必须保守
-  * 同一币种方向性操作之间需至少间隔3个执行周期，以避免噪声驱动交易
 - **最大持仓时间**：不要持有任何持仓超过36小时（${Math.floor(36 * 60 / intervalMinutes)}个周期）。无论盈亏，在36小时内平仓所有持仓。
 - **开仓前强制检查**：
   1. 使用getAccountBalance检查可用资金和账户净值
@@ -754,15 +746,16 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
 
 您的决策过程（每${intervalMinutes}分钟执行一次）：
 
-核心原则：严格遵守风控规则；仅在条件满足时才执行工具，信号不足时可明确记录“保持观望”。
+核心原则：您必须实际执行工具，不要只停留在分析阶段！
+不要只说"我会平仓"、"应该开仓"，而是立即调用对应的工具！
 
-1. 账户健康检查（最优先）：
-   - 调用 getAccountBalance 获取账户净值和可用余额
-   - 评估账户回撤情况，必要时调用 calculateRisk 审视敞口
+1. 账户健康检查（最优先，必须执行）：
+   - 立即调用 getAccountBalance 获取账户净值和可用余额
+   - 了解账户回撤情况，谨慎管理风险
 
-2. 现有持仓管理（优先于开新仓）：
-   - 调用 getPositions 获取所有持仓信息
-   - 对每个持仓进行专业分析，只有当触发条件明确时才执行交易工具：
+2. 现有持仓管理（优先于开新仓，必须实际执行工具）：
+   - 立即调用 getPositions 获取所有持仓信息
+   - 对每个持仓进行专业分析和决策（每个决策都要实际执行工具）：
    
    a) 止损决策：
       - 检查 pnl_percent 是否触及策略止损线：
@@ -770,39 +763,43 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
         * ${Math.floor((params.leverageMin + params.leverageMax) / 2)}-${Math.ceil((params.leverageMin + params.leverageMax) * 0.75)}倍杠杆：建议止损 ${params.stopLoss.mid}%
         * ${Math.ceil((params.leverageMin + params.leverageMax) * 0.75)}-${params.leverageMax}倍杠杆：建议止损 ${params.stopLoss.high}%
       - 可根据关键支撑位、趋势强度微调±1-2%
-      - 如果触及或突破止损线，除非有充分理由（关键支撑、假突破），应执行 closePosition 平仓
+      - 如果触及或突破止损线，除非有充分理由（关键支撑、假突破）
+      - 立即调用 closePosition 平仓（不要只说"应该平仓"）
    
    b) 移动止盈决策：
       - 检查是否达到移动止盈触发点（+${params.trailingStop.level1.trigger}%/+${params.trailingStop.level2.trigger}%/+${params.trailingStop.level3.trigger}%）
       - 如果达到，评估是否需要移动止损线保护利润
-      - 如果当前盈利回落到移动止损线以下，可执行 closePosition 平仓保护利润
+      - 如果当前盈利回落到移动止损线以下
+      - 立即调用 closePosition 平仓保护利润（不要犹豫）
    
    c) 分批止盈决策：
       - 检查是否达到分批止盈点（+${params.partialTakeProfit.stage1.trigger}%/+${params.partialTakeProfit.stage2.trigger}%/+${params.partialTakeProfit.stage3.trigger}%）
       - 评估趋势强度，决定是否分批止盈
-      - 如果决定分批止盈，再调用 closePosition 的 percentage 参数部分平仓
+      - 如果决定分批止盈
+      - 立即调用 closePosition 的 percentage 参数部分平仓
       - 示例：closePosition({ symbol: 'BTC', percentage: ${params.partialTakeProfit.stage1.closePercent} }) 平掉${params.partialTakeProfit.stage1.closePercent}%仓位
    
    d) 峰值回撤检查：
       - 检查 peak_pnl_percent（历史最高盈利）
       - 计算回撤：(peak_pnl_percent - pnl_percent) / peak_pnl_percent × 100%
       - 如果从峰值回撤 ≥ ${params.peakDrawdownProtection}%（${params.name}策略阈值，这是危险信号！）
-      - 强烈建议执行 closePosition 平仓或至少减仓50%
+      - 强烈建议立即调用 closePosition 平仓或减仓50%
       - 除非有明确证据表明只是正常回调（如测试均线支撑）
    
    e) 趋势反转判断（关键警告信号）：
       - 调用 getTechnicalIndicators 检查多个时间框架
       - 如果至少3个时间框架显示趋势反转（这是强烈警告信号！）
-      - 强烈建议执行 closePosition 平仓
+      - 强烈建议立即调用 closePosition 平仓
       - 记住：趋势是你的朋友，反转是你的敌人
       - 反转后想开反向仓位，必须先平掉原持仓（禁止对冲）
 
-3. 分析市场数据：
-   - 调用 getTechnicalIndicators 获取关键时间框架数据（15分钟、30分钟、1小时、4小时）
-   - 重点关注：价格趋势、EMA 交叉、MACD 动能、RSI 极值、ATR 与成交量变化
-   - ${params.entryCondition}。若不足以支持交易，可直接结论为保持观望。
+3. 分析市场数据（必须实际调用工具）：
+   - 调用 getTechnicalIndicators 获取技术指标数据
+   - 分析多个时间框架（15分钟、30分钟、1小时、4小时）
+   - 重点关注：价格、EMA、MACD、RSI
+   - ${params.entryCondition}
 
-4. 评估新交易机会（在条件满足时才执行）：
+4. 评估新交易机会（如果决定开仓，必须立即执行）：
    
    a) 加仓评估（对已有盈利持仓）：
       - 该币种已有持仓且方向正确
@@ -812,8 +809,7 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
       - 该币种加仓次数 < 2次
       - 加仓后总敞口不超过账户净值的${params.leverageMax}倍
       - 杠杆要求：必须使用与原持仓相同或更低的杠杆
-      - 与上一次对该币种的方向性操作间隔 ≥ 3 个执行周期
-      - 如果满足所有条件：先检查冷静期与 calculateRisk，再执行 openPosition 加仓
+      - 如果满足所有条件：立即调用 openPosition 加仓
    
    b) 新开仓评估（新币种）：
       - 现有持仓数 < ${RISK_PARAMS.MAX_POSITIONS}
@@ -822,9 +818,8 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
       - 做多和做空机会的识别：
         * 做多信号：价格突破EMA20/50上方，MACD转正，RSI7 > 50且上升，多个时间框架共振向上
         * 做空信号：价格跌破EMA20/50下方，MACD转负，RSI7 < 50且下降，多个时间框架共振向下
-        * 关键：做空信号和做多信号同样重要，但若信号不足应主动选择观望
-      - 与该币种上一次方向性交易间隔 ≥ 3 个执行周期
-      - 如果满足所有条件：调用 calculateRisk 确认盈亏比，再执行 openPosition
+        * 关键：做空信号和做多信号同样重要！不要只寻找做多机会而忽视做空机会
+      - 如果满足所有条件：立即调用 openPosition 开仓（不要只说"我会开仓"）
    
 5. 仓位大小和杠杆计算（${params.name}策略）：
    - 单笔交易仓位 = 账户净值 × ${params.positionSizeMin}-${params.positionSizeMax}%（根据信号强度）
@@ -844,10 +839,10 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
 
 关键提醒（${params.name}策略）：
 
-最重要：仅在规则与信号充分满足时才执行工具调用。
-- 如果信号不足，可明确说明“保持观望”并总结原因
-- 当决定执行操作时，再调用 closePosition、openPosition 等工具
-- 计划开仓或显著加仓前先调用 calculateRisk，确认盈亏比与费用匹配
+最重要：您必须实际执行工具，不要只停留在分析！
+- 不要只说"我会平仓"、"应该开仓"、"建议止损"
+- 立即调用 closePosition、openPosition 等工具
+- 每个决策都要转化为实际的工具调用
 
 交易目标：
 - 最大化风险调整后收益（夏普比率≥1.5）
@@ -869,7 +864,7 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
 - 允许加仓：对盈利>5%的持仓，趋势强化时可加仓≤50%，最多2次
 - 杠杆限制：加仓时必须使用相同或更低杠杆（禁止提高）
 - 最多持仓：${RISK_PARAMS.MAX_POSITIONS}个币种
-- 双向交易：做多和做空都能赚钱，但仅在高置信度信号出现时执行
+- 双向交易：做多和做空都能赚钱，不要只盯着做多机会
 
 执行参数：
 - 执行周期：每${intervalMinutes}分钟

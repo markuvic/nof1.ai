@@ -643,9 +643,7 @@ export class BinanceExchangeClient implements ExchangeClient {
         positionSide = params.reduceOnly ? "LONG" : "SHORT";
       }
       orderParams.positionSide = positionSide;
-    }
-
-    if (params.reduceOnly) {
+    } else if (params.reduceOnly) {
       orderParams.reduceOnly = "true";
     }
 

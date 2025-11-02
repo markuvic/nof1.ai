@@ -30,7 +30,7 @@ import { getQuantoMultiplier } from "../utils/contractUtils";
 
 const logger = createPinoLogger({
   name: "trading-loop",
-  level: "info",
+  level: (process.env.LOG_LEVEL || "info") as any,
 });
 
 const dbClient = createClient({
@@ -1481,7 +1481,8 @@ async function executeTradingDecision() {
         
         // 收集所有AI的文本回复（完整保存，不切分）
         const allTexts: string[] = [];
-        
+        const seenTexts = new Set<string>();
+
         for (let i = 0; i < steps.length; i++) {
           const step = steps[i];
           logger.debug(`处理步骤 ${i + 1}/${steps.length}`);
@@ -1492,7 +1493,11 @@ async function executeTradingDecision() {
               if (item.type === 'text' && item.text) {
                 const textLength = item.text.length;
                 logger.debug(`  提取文本内容，长度: ${textLength}`);
-                allTexts.push(item.text.trim());
+                const normalized = item.text.trim();
+                if (normalized && !seenTexts.has(normalized)) {
+                  allTexts.push(normalized);
+                  seenTexts.add(normalized);
+                }
               }
             }
           }
@@ -1500,7 +1505,11 @@ async function executeTradingDecision() {
           // 同时检查 step 的其他可能字段
           if (step.text && typeof step.text === 'string') {
             logger.debug(`  从 step.text 提取内容，长度: ${step.text.length}`);
-            allTexts.push(step.text.trim());
+            const normalized = step.text.trim();
+            if (normalized && !seenTexts.has(normalized)) {
+              allTexts.push(normalized);
+              seenTexts.add(normalized);
+            }
           }
         }
         
@@ -1512,10 +1521,19 @@ async function executeTradingDecision() {
         
         // 如果没有找到文本消息，尝试其他字段
         if (!decisionText) {
-          decisionText = (response as any).text || (response as any).message || (response as any).content || "";
+          const fallback =
+            (response as any).text ||
+            (response as any).message ||
+            (response as any).content ||
+            "";
+          const normalized = typeof fallback === "string" ? fallback.trim() : "";
+          if (normalized && !seenTexts.has(normalized)) {
+            decisionText = normalized;
+            seenTexts.add(normalized);
+          }
           logger.debug(`从备用字段提取，长度: ${decisionText.length}`);
         }
-        
+
         // 如果还是没有文本回复，说明AI只是调用了工具，没有做出决策
         if (!decisionText && steps.length > 0) {
           decisionText = "AI调用了工具但未产生决策结果";
