@@ -23,7 +23,11 @@ import cron from "node-cron";
 import { createPinoLogger } from "@voltagent/logger";
 import { createClient } from "@libsql/client";
 import { createTradingAgent, generateTradingPrompt, getAccountRiskConfig } from "../agents/tradingAgent";
-import { createExchangeClient, getActiveExchangeId } from "../services/exchanges";
+import {
+  createExchangeClient,
+  getActiveExchangeId,
+  isDryRunMode,
+} from "../services/exchanges";
 import { getChinaTimeISO } from "../utils/timeUtils";
 import { RISK_PARAMS } from "../config/riskParams";
 import { getQuantoMultiplier } from "../utils/contractUtils";
@@ -1652,7 +1656,11 @@ export function startTradingLoop() {
   
   logger.info(`启动交易循环，间隔: ${intervalMinutes} 分钟`);
   logger.info(`支持币种: ${SYMBOLS.join(", ")}`);
-  logger.info(`当前交易所: ${getActiveExchangeId()}`);
+  const exchangeId = getActiveExchangeId();
+  logger.info(`当前交易所: ${exchangeId}${isDryRunMode() ? " (dry-run)" : ""}`);
+  if (isDryRunMode()) {
+    logger.warn("⚠️  Dry-Run 模式正在运行：所有订单将仅在本地模拟，不会触发真实交易。");
+  }
   
   // 立即执行一次
   executeTradingDecision();

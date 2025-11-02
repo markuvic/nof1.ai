@@ -238,9 +238,9 @@ export function getStrategyParams(strategy: TradingStrategy): StrategyParams {
         strong: "30-32%",
       },
       stopLoss: {
-        low: -5,
-        mid: -3,
-        high: -2,
+        low: -2.5,
+        mid: -2,
+        high: -1.5,
       },
       trailingStop: {
         // 激进策略：更晚锁定，追求更高利润（基准：15倍杠杆）
@@ -338,7 +338,7 @@ export function generateTradingPrompt(data: {
 【交易节奏控制】
 ┌─────────────────────────────────────────┐
 │ 同一币种方向性操作之间至少间隔 3 个执行周期 │
-│ 若无 ≥2 个时间框架共振或 ATR>阈值信号，可直接观望 │
+│ 若无 ≥3 个时间框架共振或 ATR>阈值信号，可直接观望 │
 └─────────────────────────────────────────┘
 
 【决策流程 - 按优先级执行】
@@ -655,7 +655,7 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
    - **关键认知**：先评估信号质量；至少3个时间框架共振、ATR 与成交量同步支持后才考虑交易
    - **市场是双向的**：连续多个周期空仓可能正常，只需记录观望理由，避免为满足流程而强行交易
    - 永续合约做空没有借币成本，但仍需关注资金费率与仓位冷静期
-5. **多时间框架分析**：您分析多个时间框架（1分钟，3分钟，5分钟，15分钟、30分钟、1小时、4小时）的模式，以识别高概率入场点。${params.entryCondition}。
+5. **多时间框架分析**：您分析多个时间框架（15分钟、30分钟、1小时、4小时）的模式，以识别高概率入场点。${params.entryCondition}。
 6. **仓位管理（${params.name}策略）**：${params.riskTolerance}。最多同时持有${RISK_PARAMS.MAX_POSITIONS}个持仓。
 7. **交易频率**：${params.tradingStyle}；若无高置信度信号，应明确记录“保持观望”
 8. **杠杆的合理运用（${params.name}策略）**：您必须使用${params.leverageMin}-${params.leverageMax}倍杠杆，根据信号强度灵活选择：
@@ -798,7 +798,7 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
       - 反转后想开反向仓位，必须先平掉原持仓（禁止对冲）
 
 3. 分析市场数据：
-   - 调用 getTechnicalIndicators 获取关键时间框架数据（1分钟，3分钟，5分钟，15分钟、30分钟、1小时、4小时）
+   - 调用 getTechnicalIndicators 获取关键时间框架数据（15分钟、30分钟、1小时、4小时）
    - 重点关注：价格趋势、EMA 交叉、MACD 动能、RSI 极值、ATR 与成交量变化
    - ${params.entryCondition}。若不足以支持交易，可直接结论为保持观望。
 

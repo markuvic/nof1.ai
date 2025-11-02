@@ -27,6 +27,7 @@ import { createPinoLogger } from "@voltagent/logger";
 import { getChinaTimeISO } from "../../utils/timeUtils";
 import { RISK_PARAMS } from "../../config/riskParams";
 import { getQuantoMultiplier } from "../../utils/contractUtils";
+import { notifyTradeOpened, notifyTradeClosed } from "../../services/notifier";
 
 const logger = createPinoLogger({
   name: "trade-execution",
@@ -218,7 +219,10 @@ export const openPositionTool = createTool({
           }, 0);
           
           // 要求订单簿深度至少是开仓金额的5倍
-          const requiredDepth = amountUsdt * leverage * 5;
+          const liquidityMultiplier = Number.parseFloat(process.env.ORDERBOOK_LIQUIDITY_MULTIPLIER || "2.5");
+          const multiplier = Number.isFinite(liquidityMultiplier) && liquidityMultiplier > 0 ? liquidityMultiplier : 2.5;
+          const notionalValue = amountUsdt * leverage;
+          const requiredDepth = Math.max(notionalValue * multiplier, notionalValue * 1.2);
           
           if (bidDepth < requiredDepth) {
             return {
@@ -594,6 +598,16 @@ export const openPositionTool = createTool({
       
       const contractAmount = Math.abs(size) * quantoMultiplier;
       const totalValue = contractAmount * actualFillPrice;
+
+      notifyTradeOpened({
+        symbol,
+        side,
+        leverage: effectiveLeverage,
+        contracts: Math.abs(size),
+        entryPrice: actualFillPrice,
+        margin: actualMargin,
+        baseAmount: contractAmount,
+      });
       
       return {
         success: true,
@@ -938,6 +952,19 @@ export const closePositionTool = createTool({
           args: [symbol],
         });
       }
+
+      const baseAmountForNotify = actualCloseSize * quantoMultiplier;
+
+      notifyTradeClosed({
+        symbol,
+        side,
+        contracts: actualCloseSize,
+        entryPrice,
+        exitPrice: actualExitPrice,
+        pnl,
+        fee: totalFee,
+        baseAmount: baseAmountForNotify,
+      });
       
       return {
         success: true,

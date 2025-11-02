@@ -195,6 +195,17 @@ BINANCE_RECV_WINDOW=5000           # Binance recvWindow (ms) to avoid timestamp 
 BINANCE_TIMEOUT_MS=15000           # Binance request timeout in milliseconds
 BINANCE_MAX_RETRIES=2              # Binance max retry attempts on network failures
 BINANCE_POSITION_MODE=             # Binance position mode (ONE_WAY/HEDGE, leave empty to auto-detect)
+# Dry-Run mode (real quotes with simulated portfolio)
+EXCHANGE_DRY_RUN=false
+DRY_RUN_INITIAL_BALANCE=1000       # Virtual capital in USDT
+DRY_RUN_FEE_BPS=5                  # Simulated taker fee (basis points)
+DRY_RUN_SLIPPAGE_BPS=10            # Simulated slippage (basis points)
+DRY_RUN_MARGIN_BUFFER_BPS=50       # Extra margin buffer (basis points)
+ORDERBOOK_LIQUIDITY_MULTIPLIER=2.5 # Orderbook depth requirement multiplier
+# Telegram bot (optional)
+TELEGRAM_BOT_TOKEN=               # Telegram bot token to enable notifications and commands
+TELEGRAM_ALLOWED_CHAT_IDS=        # Authorized chat IDs (comma separated); empty = auto-authorize first chat
+TELEGRAM_NOTIFY_CHAT_IDS=         # Chat IDs for push notifications (defaults to allowed list when empty)
 
 # AI Model Provider (OpenAI Compatible API)
 OPENAI_API_KEY=your_api_key_here
@@ -211,6 +222,8 @@ AI_MAX_OUTPUT_TOKENS=4096                    # Max tokens for AI output to avoid
 - Gate.io Mainnet: https://www.gate.io/myaccount/api_key_manage
 - Binance Futures Testnet: https://testnet.binancefuture.com
 - Binance Futures Mainnet: https://www.binance.com/en/futures/api-center
+
+> **Dry-Run mode** — Only available when `EXCHANGE_PROVIDER=binance`. Set `EXCHANGE_DRY_RUN=true` to consume live Binance market data while executing orders in a local virtual portfolio. All balances, positions, and PnL are simulated, allowing you to validate strategies safely.
 
 ### Database Initialization
 
@@ -303,6 +316,11 @@ open-nof1.ai/
 | `BINANCE_TIMEOUT_MS` | Binance request timeout (ms) | 15000 | No |
 | `BINANCE_MAX_RETRIES` | Binance max retry attempts on network failure | 2 | No |
 | `BINANCE_POSITION_MODE` | Binance position mode (`ONE_WAY`/`HEDGE`, auto-detected if empty) | - | No |
+| `EXCHANGE_DRY_RUN` | Enable dry-run mode (Binance data, local portfolio simulation) | false | No |
+| `DRY_RUN_INITIAL_BALANCE` | Virtual capital for dry-run mode (USDT) | 1000 | No |
+| `DRY_RUN_FEE_BPS` | Simulated taker fee in basis points | 5 | No |
+| `DRY_RUN_SLIPPAGE_BPS` | Simulated slippage in basis points | 10 | No |
+| `DRY_RUN_MARGIN_BUFFER_BPS` | Additional required margin buffer in basis points | 50 | No |
 | `OPENAI_API_KEY` | OpenAI compatible API key | - | Yes |
 | `OPENAI_BASE_URL` | API base URL | https://openrouter.ai/api/v1 | No |
 | `AI_MODEL_NAME` | Model name | deepseek/deepseek-v3.2-exp | No |

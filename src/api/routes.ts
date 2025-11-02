@@ -23,6 +23,7 @@ import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createClient } from "@libsql/client";
 import { createExchangeClient } from "../services/exchanges";
+import { normalizeAccountSnapshot } from "../services/accountMetrics";
 import { createPinoLogger } from "@voltagent/logger";
 
 const logger = createPinoLogger({
@@ -59,6 +60,7 @@ export function createApiRoutes() {
     try {
       const exchangeClient = createExchangeClient();
       const account = await exchangeClient.getFuturesAccount();
+      const snapshot = normalizeAccountSnapshot(account);
       
       // 从数据库获取初始资金
       const initialResult = await dbClient.execute(
@@ -70,17 +72,19 @@ export function createApiRoutes() {
       
       // Gate.io 的 account.total 不包含未实现盈亏
       // 总资产（不含未实现盈亏）= account.total
-      const unrealisedPnl = Number.parseFloat(account.unrealisedPnl || "0");
-      const totalBalance = Number.parseFloat(account.total || "0");
+      const unrealisedPnl = snapshot.unrealisedPnl;
+      const totalBalance = snapshot.realizedBalance;
+      const totalEquity = snapshot.equity;
       
-      // 收益率 = (总资产 - 初始资金) / 初始资金 * 100
-      // 总资产不包含未实现盈亏，收益率反映已实现盈亏
-      const returnPercent = ((totalBalance - initialBalance) / initialBalance) * 100;
+      // 收益率 = (权益 - 初始资金) / 初始资金 * 100
+      const returnPercent = initialBalance > 0
+        ? ((totalEquity - initialBalance) / initialBalance) * 100
+        : 0;
       
       return c.json({
         totalBalance,  // 总资产（不包含未实现盈亏）
-        availableBalance: Number.parseFloat(account.available || "0"),
-        positionMargin: Number.parseFloat(account.positionMargin || "0"),
+        availableBalance: snapshot.availableBalance,
+        positionMargin: snapshot.positionMargin,
         unrealisedPnl,
         returnPercent,  // 收益率（不包含未实现盈亏）
         initialBalance,
@@ -147,6 +151,7 @@ export function createApiRoutes() {
   app.get("/api/history", async (c) => {
     try {
       const limitParam = c.req.query("limit");
+      const exchangeClient = createExchangeClient();
       
       let result;
       if (limitParam) {
@@ -168,12 +173,42 @@ export function createApiRoutes() {
         );
       }
       
-      const history = result.rows.map((row: any) => ({
+      let history = result.rows.map((row: any) => ({
         timestamp: row.timestamp,
         totalValue: Number.parseFloat(row.total_value as string) || 0,
         unrealizedPnl: Number.parseFloat(row.unrealized_pnl as string) || 0,
         returnPercent: Number.parseFloat(row.return_percent as string) || 0,
       })).reverse(); // 反转，使时间从旧到新
+
+      // 补充当前最新权益快照，避免曲线在 dry-run 模式中长时间停留在初始值
+      try {
+        const liveAccount = await exchangeClient.getFuturesAccount();
+        const liveSnapshot = normalizeAccountSnapshot(liveAccount);
+        const currentEquity = liveSnapshot.equity;
+        const currentUnrealised = liveSnapshot.unrealisedPnl;
+        const lastPoint = history.at(-1);
+        const nowIso = new Date().toISOString();
+        const initialBase = history.length > 0 ? history[0].totalValue : currentEquity;
+        const liveReturnPercent = initialBase > 0
+          ? ((currentEquity - initialBase) / initialBase) * 100
+          : 0;
+
+        const hasRecentPoint = lastPoint
+          ? Math.abs(lastPoint.totalValue - currentEquity) < 1e-4
+          && Math.abs(currentUnrealised - lastPoint.unrealizedPnl) < 1e-4
+          : false;
+
+        if (!hasRecentPoint) {
+          history = [...history, {
+            timestamp: nowIso,
+            totalValue: currentEquity,
+            unrealizedPnl: currentUnrealised,
+            returnPercent: liveReturnPercent,
+          }];
+        }
+      } catch (error) {
+        logger.warn("获取当前账户权益失败，使用历史数据展示:", error as any);
+      }
       
       return c.json({ history });
     } catch (error: any) {

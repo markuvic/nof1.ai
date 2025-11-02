@@ -1,6 +1,7 @@
 import { createPinoLogger } from "@voltagent/logger";
 import { createGateExchangeClient } from "./gateExchangeClient";
 import { createBinanceExchangeClient } from "./binanceExchangeClient";
+import { createBinanceDryRunExchangeClient } from "./dryRunExchangeClient";
 import type { ExchangeClient, ExchangeId, ExchangeOrderParams } from "./types";
 
 const logger = createPinoLogger({
@@ -9,7 +10,7 @@ const logger = createPinoLogger({
 });
 
 let cachedClient: ExchangeClient | null = null;
-let cachedExchange: ExchangeId | null = null;
+let cachedClientKey: string | null = null;
 
 function normalizeExchangeId(raw?: string | null): ExchangeId {
   if (!raw) return "gate";
@@ -32,28 +33,41 @@ export function getActiveExchangeId(): ExchangeId {
   return normalizeExchangeId(envValue);
 }
 
+export function isDryRunMode(): boolean {
+  return (
+    process.env.EXCHANGE_DRY_RUN === "true" ||
+    process.env.DRY_RUN === "true" ||
+    process.env.DRY_RUN_MODE === "true"
+  );
+}
+
 export function createExchangeClient(): ExchangeClient {
   const exchangeId = getActiveExchangeId();
+  const dryRunEnabled = isDryRunMode() && exchangeId === "binance";
+  const key = dryRunEnabled ? `${exchangeId}-dry-run` : exchangeId;
 
-  if (cachedClient && cachedExchange === exchangeId) {
+  if (cachedClient && cachedClientKey === key) {
     return cachedClient;
   }
 
-  if (exchangeId === "binance") {
+  if (dryRunEnabled) {
+    cachedClient = createBinanceDryRunExchangeClient();
+    logger.info("已启用 Binance Dry-Run 模式，所有交易将在本地模拟执行。");
+  } else if (exchangeId === "binance") {
     cachedClient = createBinanceExchangeClient();
   } else {
     cachedClient = createGateExchangeClient();
   }
 
-  cachedExchange = exchangeId;
-  logger.info(`已选择交易所: ${exchangeId}`);
+  cachedClientKey = key;
+  logger.info(`已选择交易所: ${key}`);
 
   return cachedClient;
 }
 
 export function resetExchangeClientCache() {
   cachedClient = null;
-  cachedExchange = null;
+  cachedClientKey = null;
 }
 
 export type { ExchangeClient, ExchangeId, ExchangeOrderParams };

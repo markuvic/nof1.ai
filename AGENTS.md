@@ -20,6 +20,8 @@ This playbook supports contributors building the AI-driven trading agent that po
 - TypeScript, ES modules, Node.js ≥20.19.0, strict compiler flags enabled. Use 2-space indentation and trailing commas per Biome defaults.
 - Name files and modules with kebab-case (`trading-loop.ts`), export classes with PascalCase, and functions/instances with camelCase.
 - Keep environment-specific constants in `src/config/` and guard direct `.env` access to boot-time code.
+- Binance dry-run mode mirrors freqtrade’s `dry-run`: set `EXCHANGE_DRY_RUN=true` (Binance only) to consume live quotes while executing orders against the in-process simulator (`src/services/exchanges/dryRunExchangeClient.ts`). Document expected behaviour in PRs when toggling this flag.
+- Telegram notifications are optional: set `TELEGRAM_BOT_TOKEN` to enable the bot (`src/services/telegramBot.ts`). Keep notifier calls (`src/services/notifier.ts`) side-effect free so missing credentials never break trade execution.
 
 ## Configuration Notes
 - Toggle exchanges via `EXCHANGE_PROVIDER` in `.env` (`gate` or `binance`); surface-specific credentials (`GATE_API_*` or `BINANCE_API_*`) must be present for the selected provider.

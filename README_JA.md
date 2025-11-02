@@ -190,6 +190,17 @@ BINANCE_RECV_WINDOW=5000           # Binance API 時間ウィンドウ（ミリ�
 BINANCE_TIMEOUT_MS=15000           # Binance リクエストのタイムアウト（ミリ秒）
 BINANCE_MAX_RETRIES=2              # Binance リクエストの最大リトライ回数
 BINANCE_POSITION_MODE=             # Binance ポジションモード（ONE_WAY/HEDGE、空の場合は自動判定）
+# ドライランモード（Binance のリアルタイム相場 + ローカル仮想資金）
+EXCHANGE_DRY_RUN=false
+DRY_RUN_INITIAL_BALANCE=1000       # 仮想資金 (USDT)
+DRY_RUN_FEE_BPS=5                  # 想定テイカーフィー（ベーシスポイント）
+DRY_RUN_SLIPPAGE_BPS=10            # 想定スリッページ（ベーシスポイント）
+DRY_RUN_MARGIN_BUFFER_BPS=50       # 追加証拠金バッファ（ベーシスポイント）
+ORDERBOOK_LIQUIDITY_MULTIPLIER=2.5 # オーダーブック深度の要求倍率（名目敞口の 2.5 倍）
+# Telegram ボット（任意）
+TELEGRAM_BOT_TOKEN=               # Telegram ボットトークン（通知・コマンドを有効化）
+TELEGRAM_ALLOWED_CHAT_IDS=        # 許可された Chat ID（カンマ区切り、空の場合は初回メッセージで自動許可）
+TELEGRAM_NOTIFY_CHAT_IDS=         # 通知を送る Chat ID（未設定の場合は許可リストを使用）
 
 # AI モデルプロバイダー (OpenAI 互換 API)
 OPENAI_API_KEY=your_api_key_here
@@ -210,6 +221,10 @@ ACCOUNT_DRAWDOWN_FORCE_CLOSE_PERCENT=50      # 強制決済しきい値：すべ
 - DeepSeek: https://platform.deepseek.com/api_keys
 - Gate.io テストネット: https://www.gate.io/testnet
 - Gate.io 本番ネット: https://www.gate.io/myaccount/api_key_manage
+- Binance Futures テストネット: https://testnet.binancefuture.com
+- Binance Futures 本番: https://www.binance.com/ja/futures/api-center
+
+> **Dry-Run モード**: `EXCHANGE_PROVIDER=binance` の場合に `EXCHANGE_DRY_RUN=true` を設定すると、Binance のリアルタイムデータを使用しつつ、全ての注文・ポジション・資金管理がローカルの仮想ウォレットでシミュレーションされます。安全に戦略検証が可能です。
 
 ### データベース初期化
 

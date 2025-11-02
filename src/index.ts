@@ -24,6 +24,8 @@ import { startTradingLoop, initTradingSystem } from "./scheduler/tradingLoop";
 import { startAccountRecorder } from "./scheduler/accountRecorder";
 import { initDatabase } from "./database/init";
 import { RISK_PARAMS } from "./config/riskParams";
+import { isDryRunMode } from "./services/exchanges";
+import { initTelegramBot, stopTelegramBot } from "./services/telegramBot";
 
 // 设置时区为中国时间（Asia/Shanghai，UTC+8）
 process.env.TZ = 'Asia/Shanghai';
@@ -82,6 +84,13 @@ async function main() {
   // 5. 启动账户资产记录器
   logger.info("启动账户资产记录器...");
   startAccountRecorder();
+
+  // 6. 启动 Telegram 机器人（可选）
+  await initTelegramBot();
+  
+  if (isDryRunMode()) {
+    logger.warn("🚧 Dry-Run 模式启用：所有交易仅在本地模拟，不会向交易所提交真实订单。");
+  }
   
   logger.info("\n" + "=".repeat(80));
   logger.info("系统启动完成！");
@@ -112,6 +121,7 @@ async function gracefulShutdown(signal: string) {
   logger.info(`\n\n收到 ${signal} 信号，正在关闭系统...`);
   
   try {
+    await stopTelegramBot();
     // 关闭服务器
     if (server) {
       logger.info("正在关闭 Web 服务器...");

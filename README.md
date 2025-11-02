@@ -121,6 +121,17 @@ BINANCE_RECV_WINDOW=5000           # Binance 时间窗口（毫秒）
 BINANCE_TIMEOUT_MS=15000           # Binance 请求超时时间（毫秒）
 BINANCE_MAX_RETRIES=2              # Binance 请求最大重试次数
 BINANCE_POSITION_MODE=             # Binance 持仓模式（ONE_WAY/HEDGE，可留空自动探测）
+# Dry-Run 模式（使用 Binance 实时行情 + 本地模拟资金）
+EXCHANGE_DRY_RUN=false
+DRY_RUN_INITIAL_BALANCE=1000       # 虚拟资金 (USDT)
+DRY_RUN_FEE_BPS=5                  # 模拟手续费（基点）
+DRY_RUN_SLIPPAGE_BPS=10            # 模拟滑点（基点）
+DRY_RUN_MARGIN_BUFFER_BPS=50       # 额外保证金缓冲（基点）
+ORDERBOOK_LIQUIDITY_MULTIPLIER=2.5 # 订单簿深度倍数（默认名义敞口的 2.5 倍）
+# Telegram 机器人（可选）
+TELEGRAM_BOT_TOKEN=               # Telegram Bot Token，启用机器人交互与通知
+TELEGRAM_ALLOWED_CHAT_IDS=        # 允许交互的 Chat ID，逗号分隔（留空表示首次对话即授权）
+TELEGRAM_NOTIFY_CHAT_IDS=         # 推送通知的 Chat ID，逗号分隔（未设置时默认使用允许列表）
 
 # AI 模型提供商（OpenAI 兼容 API）
 OPENAI_API_KEY=your_api_key_here
@@ -143,6 +154,8 @@ ACCOUNT_DRAWDOWN_FORCE_CLOSE_PERCENT=50      # 强制平仓阈值：自动平掉
 - Gate.io 正式网: https://www.gate.io/myaccount/api_key_manage
 - Binance 测试网: https://testnet.binancefuture.com
 - Binance 正式网: https://www.binance.com/cn/futures-api
+
+> **Dry-Run 提示**：当 `EXCHANGE_PROVIDER=binance` 且 `EXCHANGE_DRY_RUN=true` 时，系统会继续拉取 Binance 实时行情，但所有订单、持仓、资金都会在本地虚拟账户中模拟，适合策略验证与调试。
 
 ### 数据库初始化
 

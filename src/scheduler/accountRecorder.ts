@@ -23,8 +23,9 @@
 import cron from "node-cron";
 import { createPinoLogger } from "@voltagent/logger";
 import { createClient } from "@libsql/client";
-import { createExchangeClient } from "../services/exchanges";
+import { createExchangeClient, isDryRunMode } from "../services/exchanges";
 import { getChinaTimeISO } from "../utils/timeUtils";
+import { normalizeAccountSnapshot } from "../services/accountMetrics";
 
 const logger = createPinoLogger({
   name: "account-recorder",
@@ -39,22 +40,15 @@ const dbClient = createClient({
  * Record account assets including unrealized PnL
  * 记录账户资产（包含未实现盈亏）
  */
-async function recordAccountAssets() {
+export async function recordAccountSnapshot(source: string = "scheduled") {
   try {
     const exchangeClient = createExchangeClient();
     
-    // Get account information from Gate.io
     const account = await exchangeClient.getFuturesAccount();
-    
-    // Extract account data
-    // Gate.io 的 account.total 不包含未实现盈亏
-    // 需要主动加上 unrealisedPnl 才是真实的总资产
-    const accountTotal = Number.parseFloat(account.total || "0");
-    const availableBalance = Number.parseFloat(account.available || "0");
-    const unrealisedPnl = Number.parseFloat(account.unrealisedPnl || "0");
-    
-    // Total balance = account.total + unrealisedPnl (包含未实现盈亏的总资产)
-    const totalBalance = accountTotal + unrealisedPnl;
+    const snapshot = normalizeAccountSnapshot(account);
+    const totalEquity = snapshot.equity;
+    const unrealisedPnl = snapshot.unrealisedPnl;
+    const availableBalance = snapshot.availableBalance;
     
     // Get initial balance from database
     const initialResult = await dbClient.execute(
@@ -62,10 +56,10 @@ async function recordAccountAssets() {
     );
     const initialBalance = initialResult.rows[0]
       ? Number.parseFloat(initialResult.rows[0].total_value as string)
-      : totalBalance; // Use current balance as initial if no history exists
+      : totalEquity; // Use current balance as initial if no history exists
     
     // Calculate realized PnL and return percentage
-    const realizedPnl = totalBalance - initialBalance;
+    const realizedPnl = totalEquity - initialBalance;
     const returnPercent = initialBalance > 0 
       ? (realizedPnl / initialBalance) * 100 
       : 0;
@@ -77,7 +71,7 @@ async function recordAccountAssets() {
             VALUES (?, ?, ?, ?, ?, ?)`,
       args: [
         getChinaTimeISO(),
-        totalBalance,
+        totalEquity,
         availableBalance,
         unrealisedPnl,
         realizedPnl,
@@ -86,7 +80,7 @@ async function recordAccountAssets() {
     });
     
     logger.info(
-      `📊 Account recorded: Total=${totalBalance.toFixed(2)} USDT, ` +
+      `📊 Account recorded [${source}]: Equity=${totalEquity.toFixed(2)} USDT, ` +
       `Available=${availableBalance.toFixed(2)} USDT, ` +
       `Unrealized PnL=${unrealisedPnl >= 0 ? '+' : ''}${unrealisedPnl.toFixed(2)} USDT, ` +
       `Return=${returnPercent >= 0 ? '+' : ''}${returnPercent.toFixed(2)}%`
@@ -101,19 +95,22 @@ async function recordAccountAssets() {
  * 启动账户资产记录器
  */
 export function startAccountRecorder() {
+  const intervalConfig = process.env.ACCOUNT_RECORD_INTERVAL_MINUTES;
+  const defaultInterval = isDryRunMode() ? 1 : 10;
   const intervalMinutes = Number.parseInt(
-    process.env.ACCOUNT_RECORD_INTERVAL_MINUTES || "10"
+    intervalConfig ?? defaultInterval.toString(),
+    10,
   );
   
   logger.info(`Starting account recorder, interval: ${intervalMinutes} minutes`);
   
   // Execute immediately on startup
-  recordAccountAssets();
+  recordAccountSnapshot("startup");
   
   // Schedule periodic recording
   const cronExpression = `*/${intervalMinutes} * * * *`;
   cron.schedule(cronExpression, () => {
-    recordAccountAssets();
+    recordAccountSnapshot("cron");
   });
   
   logger.info(`Account recorder scheduled: ${cronExpression}`);

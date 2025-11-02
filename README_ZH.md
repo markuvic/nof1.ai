@@ -193,6 +193,17 @@ BINANCE_USE_TESTNET=true
 BINANCE_RECV_WINDOW=5000           # Binance API 时间窗口（毫秒，避免 timestamp 错误）
 BINANCE_TIMEOUT_MS=15000           # Binance 请求超时时间（毫秒，可视网络情况调整）
 BINANCE_MAX_RETRIES=2              # Binance 请求最大重试次数
+# Dry-Run 模式（真实行情 + 本地虚拟资金）
+EXCHANGE_DRY_RUN=false
+DRY_RUN_INITIAL_BALANCE=1000       # 本地虚拟资金 (USDT)
+DRY_RUN_FEE_BPS=5                  # 模拟手续费 (基点)
+DRY_RUN_SLIPPAGE_BPS=10            # 模拟滑点 (基点)
+DRY_RUN_MARGIN_BUFFER_BPS=50       # 保证金缓冲 (基点)
+ORDERBOOK_LIQUIDITY_MULTIPLIER=2.5 # 订单簿深度倍数（默认名义敞口的 2.5 倍）
+# Telegram 机器人（可选）
+TELEGRAM_BOT_TOKEN=               # Telegram Bot Token，启用机器人命令与通知
+TELEGRAM_ALLOWED_CHAT_IDS=        # 允许交互的 Chat ID，逗号分隔（留空表示首次对话即授权）
+TELEGRAM_NOTIFY_CHAT_IDS=         # 推送通知的 Chat ID，逗号分隔（未配置时默认使用允许列表）
 
 # AI 模型提供商（OpenAI 兼容 API）
 OPENAI_API_KEY=your_api_key_here
@@ -854,3 +865,4 @@ npm run trading:start
 [![Star History Chart](https://api.star-history.com/svg?repos=195440/open-nof1.ai&type=Date)](https://star-history.com/#195440/open-nof1.ai&Date)
 
 </div>
+- **Dry-Run 模式**: 仅限 `EXCHANGE_PROVIDER=binance` 时启用。设置 `EXCHANGE_DRY_RUN=true` 后，系统会继续使用 Binance 的实时行情与指标，但所有下单、持仓、资金变动都在本地模拟，不会触发真实交易。建议用于策略验证或模型调试。
