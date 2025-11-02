@@ -6,7 +6,7 @@
 
 [![VoltAgent](https://img.shields.io/badge/Framework-VoltAgent-purple.svg)](https://voltagent.dev)
 [![OpenAI Compatible](https://img.shields.io/badge/AI-OpenAI_Compatible-orange.svg)](https://openrouter.ai)
-[![Gate.io](https://img.shields.io/badge/Exchange-Gate.io-00D4AA.svg)](https://www.gate.io)
+[![Gate.io](https://img.shields.io/badge/Exchange-Gate.io-00D4AA.svg)](https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103)
 [![Binance](https://img.shields.io/badge/Exchange-Binance-FAA81A.svg)](https://www.binance.com/en/futures)
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Node.js](https://img.shields.io/badge/Runtime-Node.js%2020+-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
@@ -81,7 +81,7 @@ The system follows a **minimal human intervention** design philosophy, abandonin
 |-----------|-----------|---------|
 | Framework | [VoltAgent](https://voltagent.dev) | AI Agent orchestration and management |
 | AI Provider | OpenAI Compatible API | Supports OpenRouter, OpenAI, DeepSeek and other compatible providers |
-| Exchange | [Gate.io](https://www.gate.io), [Binance Futures](https://www.binance.com/en/futures) | Cryptocurrency trading (testnet & mainnet) |
+| Exchange | [Gate.io](https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103), [Binance Futures](https://www.binance.com/en/futures) | Cryptocurrency trading (testnet & mainnet) |
 | Database | LibSQL (SQLite) | Local data persistence |
 | Web Server | Hono | High-performance HTTP framework |
 | Language | TypeScript | Type-safe development |
@@ -219,19 +219,21 @@ AI_MAX_OUTPUT_TOKENS=4096                    # Max tokens for AI output to avoid
 - OpenAI: https://platform.openai.com/api-keys
 - DeepSeek: https://platform.deepseek.com/api_keys
 - Gate.io Testnet: https://www.gate.io/testnet
-- Gate.io Mainnet: https://www.gate.io/myaccount/api_key_manage
+- Gate.io Mainnet: https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103
 - Binance Futures Testnet: https://testnet.binancefuture.com
 - Binance Futures Mainnet: https://www.binance.com/en/futures/api-center
 
+> **Tip**: Register a Gate.io account using the above referral link or invitation code `VVVEA10LVQ` to receive commission rebates on your trades.
+
 > **Dry-Run mode** — Only available when `EXCHANGE_PROVIDER=binance`. Set `EXCHANGE_DRY_RUN=true` to consume live Binance market data while executing orders in a local virtual portfolio. All balances, positions, and PnL are simulated, allowing you to validate strategies safely.
 
-### Database Initialization
+### Step 5: Database Initialization
 
 ```bash
 npm run db:init
 ```
 
-### Start Trading System
+### Step 6: Start Trading System
 
 ```bash
 # Development mode with hot reload
@@ -768,6 +770,17 @@ npm run trading:start
 ```
 
 ## Resources
+
+### Support Continuous Project Development
+
+If you don't have a Gate.io account yet, we recommend registering through this referral:
+
+- **Referral Link**: [https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103](https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103)
+- **Invitation Code**: `VVVEA10LVQ`
+
+> By registering with the referral code, you'll receive trading commission rebates while helping maintain this open-source project's long-term operation. It benefits both you and the project, completely free with no extra costs.
+
+> **Tip**: Testnet and mainnet can use the same account. We recommend thorough testing on testnet before real trading.
 
 ### External Links
 

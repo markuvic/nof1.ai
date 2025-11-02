@@ -1123,6 +1123,10 @@ body {
         overflow: hidden;
     }
 
+    .logo {
+        font-size: 1.2rem;
+    }
+
     .nav-bar {
         max-width: 100%;
         overflow: hidden;

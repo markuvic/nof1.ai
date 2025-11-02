@@ -6,7 +6,7 @@
 
 [![VoltAgent](https://img.shields.io/badge/Framework-VoltAgent-purple.svg)](https://voltagent.dev)
 [![OpenAI Compatible](https://img.shields.io/badge/AI-OpenAI_Compatible-orange.svg)](https://openrouter.ai)
-[![Gate.io](https://img.shields.io/badge/Exchange-Gate.io-00D4AA.svg)](https://www.gate.io)
+[![Gate.io](https://img.shields.io/badge/Exchange-Gate.io-00D4AA.svg)](https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103)
 [![Binance](https://img.shields.io/badge/Exchange-Binance-FAA81A.svg)](https://www.binance.com/zh-CN/futures)
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Node.js](https://img.shields.io/badge/Runtime-Node.js%2020+-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
@@ -217,17 +217,19 @@ AI_MAX_OUTPUT_TOKENS=4096                    # AI 输出最大 Token（避免回
 - OpenAI: https://platform.openai.com/api-keys
 - DeepSeek: https://platform.deepseek.com/api_keys
 - Gate.io 测试网: https://www.gate.io/testnet
-- Gate.io 正式网: https://www.gate.io/myaccount/api_key_manage
+- Gate.io 正式网: https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103
 - Binance 测试网: https://testnet.binancefuture.com
 - Binance 正式网: https://www.binance.com/zh-CN/futures/api-center
 
-### 数据库初始化
+> **提示**: 通过上方邀请链接或使用邀请码 `VVVEA10LVQ` 注册 Gate.io 账户，您将获得交易佣金返还优惠。
+
+### 第五步：数据库初始化
 
 ```bash
 npm run db:init
 ```
 
-### 启动交易系统
+### 第六步：启动交易系统
 
 ```bash
 # 开发模式(热重载)
@@ -236,6 +238,8 @@ npm run dev
 # 生产模式
 npm run trading:start
 ```
+
+> **Dry-Run 提示**：当 `EXCHANGE_PROVIDER=binance` 且 `EXCHANGE_DRY_RUN=true` 时，系统会继续拉取 Binance 实时行情，但所有订单、持仓、资金都会在本地虚拟账户中模拟，适合策略验证与调试。
 
 ### 访问 Web 仪表板
 
@@ -764,6 +768,17 @@ npm run trading:start
 ```
 
 ## 资源
+
+### 支持项目持续发展
+
+如果您还没有 Gate.io 账户，推荐通过以下邀请方式注册：
+
+- **邀请链接**: [https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103](https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103)
+- **邀请码**: `VVVEA10LVQ`
+
+> 使用邀请码注册，您将获得交易返佣优惠，同时帮助维护这个开源项目的长期运营。这对您和项目都有益，且完全免费无任何额外费用。
+
+> **提示**：测试网和正式网可以用同一个账户，建议您先在测试网充分测试后再进行真实交易。
 
 ### 外部链接
 
