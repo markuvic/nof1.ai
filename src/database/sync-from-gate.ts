@@ -23,7 +23,7 @@ import "dotenv/config";
 import { createClient } from "@libsql/client";
 import { CREATE_TABLES_SQL } from "./schema";
 import { createPinoLogger } from "@voltagent/logger";
-import { createGateClient } from "../services/gateClient";
+import { createExchangeClient } from "../services/exchanges";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -37,8 +37,8 @@ async function syncFromGate() {
     logger.info("🔄 从 Gate.io 同步账户信息...");
     
     // 1. 连接 Gate.io 获取当前账户余额
-    const gateClient = createGateClient();
-    const account = await gateClient.getFuturesAccount();
+    const exchangeClient = createExchangeClient();
+    const account = await exchangeClient.getFuturesAccount();
     
     const accountTotal = Number.parseFloat(account.total || "0");
     const availableBalance = Number.parseFloat(account.available || "0");
@@ -55,8 +55,10 @@ async function syncFromGate() {
     logger.info(`   可用资金: ${availableBalance} USDT`);
     
     // 2. 获取持仓信息
-    const positions = await gateClient.getPositions();
-    const activePositions = positions.filter(p => Number.parseInt(p.size || "0") !== 0);
+    const positions = await exchangeClient.getPositions();
+    const activePositions = positions.filter(
+      (p: any) => Number.parseInt(p.size || "0") !== 0,
+    );
     logger.info(`   当前持仓数: ${activePositions.length}`);
     
     if (activePositions.length > 0) {
@@ -191,7 +193,8 @@ async function syncFromGate() {
       fs.writeFileSync(envPath, envContent, "utf-8");
       logger.info(`✅ .env 文件已更新`);
     } catch (error) {
-      logger.warn(`⚠️  更新 .env 文件失败:`, error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.warn(`⚠️  更新 .env 文件失败: ${errMsg}`);
       logger.warn(`   请手动设置 INITIAL_BALANCE=${currentBalance.toFixed(2)}`);
     }
     
@@ -217,11 +220,11 @@ async function syncFromGate() {
     
     client.close();
   } catch (error) {
-    logger.error("❌ 同步失败:", error as any);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`❌ 同步失败: ${errMsg}`);
     process.exit(1);
   }
 }
 
 // 执行同步
 syncFromGate();
-

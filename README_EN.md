@@ -7,6 +7,7 @@
 [![VoltAgent](https://img.shields.io/badge/Framework-VoltAgent-purple.svg)](https://voltagent.dev)
 [![OpenAI Compatible](https://img.shields.io/badge/AI-OpenAI_Compatible-orange.svg)](https://openrouter.ai)
 [![Gate.io](https://img.shields.io/badge/Exchange-Gate.io-00D4AA.svg)](https://www.gate.io)
+[![Binance](https://img.shields.io/badge/Exchange-Binance-FAA81A.svg)](https://www.binance.com/en/futures)
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Node.js](https://img.shields.io/badge/Runtime-Node.js%2020+-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
@@ -20,7 +21,7 @@
 
 open-nof1.ai is an AI-powered cryptocurrency automated trading system that deeply integrates large language model intelligence with quantitative trading practices. Built on an Agent framework, the system achieves truly intelligent trading by granting AI complete autonomy in market analysis and trading decisions.
 
-The system follows a **minimal human intervention** design philosophy, abandoning traditional hardcoded trading rules and allowing AI models to autonomously learn and make decisions based on raw market data. It integrates with Gate.io exchange (supporting both testnet and mainnet), provides complete perpetual contract trading capabilities, covers mainstream cryptocurrencies such as BTC, ETH, SOL, and supports full automation from data collection, intelligent analysis, risk management to trade execution.
+The system follows a **minimal human intervention** design philosophy, abandoning traditional hardcoded trading rules and allowing AI models to autonomously learn and make decisions based on raw market data. It integrates with both Gate.io and Binance futures exchanges (supporting testnet and mainnet), provides complete perpetual contract trading capabilities, covers mainstream cryptocurrencies such as BTC, ETH, SOL, and supports full automation from data collection, intelligent analysis, risk management to trade execution.
 
 ![open-nof1.ai](./public/image.png)
 
@@ -58,8 +59,8 @@ The system follows a **minimal human intervention** design philosophy, abandonin
 └─────────┬───────────────────────────────────┬───────────┘
           │                                   │
 ┌─────────┴──────────┐            ┌───────────┴───────────┐
-│    Trading Tools   │            │   Gate.io API Client  │
-│                    │            │                       │
+│    Trading Tools   │            │ Exchange API Clients  │
+│                    │            │  (Gate.io / Binance)  │
 │ - Market Data      │◄───────────┤ - Order Management    │
 │ - Account Info     │            │ - Position Query      │
 │ - Trade Execution  │            │ - Market Data Stream  │
@@ -80,7 +81,7 @@ The system follows a **minimal human intervention** design philosophy, abandonin
 |-----------|-----------|---------|
 | Framework | [VoltAgent](https://voltagent.dev) | AI Agent orchestration and management |
 | AI Provider | OpenAI Compatible API | Supports OpenRouter, OpenAI, DeepSeek and other compatible providers |
-| Exchange | [Gate.io](https://www.gate.io) | Cryptocurrency trading (testnet & mainnet) |
+| Exchange | [Gate.io](https://www.gate.io), [Binance Futures](https://www.binance.com/en/futures) | Cryptocurrency trading (testnet & mainnet) |
 | Database | LibSQL (SQLite) | Local data persistence |
 | Web Server | Hono | High-performance HTTP framework |
 | Language | TypeScript | Type-safe development |
@@ -111,7 +112,7 @@ The system follows a **minimal human intervention** design philosophy, abandonin
 - **Leverage Range**: 1x to 10x (configurable)
 - **Order Types**: Market orders, stop-loss, take-profit
 - **Position Direction**: Long and short positions
-- **Real-time Execution**: Sub-second order placement via Gate.io API
+- **Real-time Execution**: Sub-second order placement via exchange APIs (Gate.io / Binance)
 
 ### Real-Time Monitoring Interface
 
@@ -178,15 +179,28 @@ INITIAL_BALANCE=2000            # Initial capital in USDT
 # Database
 DATABASE_URL=file:./.voltagent/trading.db
 
-# Gate.io API Credentials (use testnet first!)
+# Exchange Configuration
+EXCHANGE_PROVIDER=gate          # Supports gate | binance
+
+# Gate.io API Credentials (required when EXCHANGE_PROVIDER=gate)
 GATE_API_KEY=your_api_key_here
 GATE_API_SECRET=your_api_secret_here
 GATE_USE_TESTNET=true
+
+# Binance API Credentials (required when EXCHANGE_PROVIDER=binance)
+BINANCE_API_KEY=your_binance_key
+BINANCE_API_SECRET=your_binance_secret
+BINANCE_USE_TESTNET=true
+BINANCE_RECV_WINDOW=5000           # Binance recvWindow (ms) to avoid timestamp errors
+BINANCE_TIMEOUT_MS=15000           # Binance request timeout in milliseconds
+BINANCE_MAX_RETRIES=2              # Binance max retry attempts on network failures
+BINANCE_POSITION_MODE=             # Binance position mode (ONE_WAY/HEDGE, leave empty to auto-detect)
 
 # AI Model Provider (OpenAI Compatible API)
 OPENAI_API_KEY=your_api_key_here
 OPENAI_BASE_URL=https://openrouter.ai/api/v1  # Optional, supports OpenRouter, OpenAI, DeepSeek, etc.
 AI_MODEL_NAME=deepseek/deepseek-v3.2-exp      # Model name
+AI_MAX_OUTPUT_TOKENS=4096                    # Max tokens for AI output to avoid truncation
 ```
 
 **API Key Acquisition**:
@@ -195,6 +209,8 @@ AI_MODEL_NAME=deepseek/deepseek-v3.2-exp      # Model name
 - DeepSeek: https://platform.deepseek.com/api_keys
 - Gate.io Testnet: https://www.gate.io/testnet
 - Gate.io Mainnet: https://www.gate.io/myaccount/api_key_manage
+- Binance Futures Testnet: https://testnet.binancefuture.com
+- Binance Futures Mainnet: https://www.binance.com/en/futures/api-center
 
 ### Database Initialization
 
@@ -233,7 +249,9 @@ open-nof1.ai/
 │   ├── scheduler/
 │   │   └── tradingLoop.ts            # Trading cycle orchestration
 │   ├── services/
-│   │   ├── gateClient.ts             # Gate.io API client wrapper
+│   │   ├── exchanges/                # Exchange client implementations
+│   │   │   ├── gateExchangeClient.ts # Gate.io API client wrapper
+│   │   │   └── index.ts              # Exchange factory & shared types
 │   │   └── multiTimeframeAnalysis.ts # Multi-timeframe data aggregator
 │   ├── tools/
 │   │   └── trading/                  # VoltAgent tool implementations
@@ -274,12 +292,21 @@ open-nof1.ai/
 | `MAX_HOLDING_HOURS` | Maximum holding time in hours | 36 | No |
 | `INITIAL_BALANCE` | Initial capital in USDT | 2000 | No |
 | `DATABASE_URL` | SQLite database file path | file:./.voltagent/trading.db | No |
-| `GATE_API_KEY` | Gate.io API key | - | Yes |
-| `GATE_API_SECRET` | Gate.io API secret | - | Yes |
+| `EXCHANGE_PROVIDER` | Exchange selection: `gate` or `binance` | gate | No |
+| `GATE_API_KEY` | Gate.io API key (required when `EXCHANGE_PROVIDER=gate`) | - | Conditional |
+| `GATE_API_SECRET` | Gate.io API secret (required when `EXCHANGE_PROVIDER=gate`) | - | Conditional |
 | `GATE_USE_TESTNET` | Use testnet environment | true | No |
+| `BINANCE_API_KEY` | Binance Futures API key (required when `EXCHANGE_PROVIDER=binance`) | - | Conditional |
+| `BINANCE_API_SECRET` | Binance Futures API secret (required when `EXCHANGE_PROVIDER=binance`) | - | Conditional |
+| `BINANCE_USE_TESTNET` | Use Binance testnet endpoints | true | No |
+| `BINANCE_RECV_WINDOW` | Binance recvWindow (ms) to avoid timestamp drift | 5000 | No |
+| `BINANCE_TIMEOUT_MS` | Binance request timeout (ms) | 15000 | No |
+| `BINANCE_MAX_RETRIES` | Binance max retry attempts on network failure | 2 | No |
+| `BINANCE_POSITION_MODE` | Binance position mode (`ONE_WAY`/`HEDGE`, auto-detected if empty) | - | No |
 | `OPENAI_API_KEY` | OpenAI compatible API key | - | Yes |
 | `OPENAI_BASE_URL` | API base URL | https://openrouter.ai/api/v1 | No |
 | `AI_MODEL_NAME` | Model name | deepseek/deepseek-v3.2-exp | No |
+| `AI_MAX_OUTPUT_TOKENS` | Max tokens for AI output (prevents truncation) | 4096 | No |
 | `ACCOUNT_DRAWDOWN_WARNING_PERCENT` | Account drawdown warning threshold: triggers risk alert (%) | 20 | No |
 | `ACCOUNT_DRAWDOWN_NO_NEW_POSITION_PERCENT` | Drawdown threshold to stop opening new positions, only allow closing (%) | 30 | No |
 | `ACCOUNT_DRAWDOWN_FORCE_CLOSE_PERCENT` | Drawdown threshold to force close all positions to protect remaining funds (%) | 50 | No |
@@ -357,7 +384,7 @@ npm run db:reset
 # Check database status
 npm run db:status
 
-# Sync data from Gate.io
+# Sync data from exchange (Gate.io / Binance)
 npm run db:sync
 
 # Sync position data
@@ -540,12 +567,13 @@ npm run trading:start
 
 #### API Credentials Not Configured
 
-**Error**: `GATE_API_KEY and GATE_API_SECRET must be set in environment variables`
+**Error**: `Exchange API credentials are missing (check GATE_API_* or BINANCE_API_*)`
 
 **Solution**:
 ```bash
 # Verify .env file
 cat .env | grep GATE_API
+cat .env | grep BINANCE_API
 
 # Edit configuration
 nano .env
@@ -731,6 +759,8 @@ npm run trading:start
 - [DeepSeek API Documentation](https://platform.deepseek.com/api-docs/)
 - [Gate.io API Reference](https://www.gate.io/docs/developers/apiv4/)
 - [Gate.io Testnet](https://www.gate.io/testnet)
+- [Binance Futures API Reference](https://binance-docs.github.io/apidocs/futures/en/)
+- [Binance Futures Testnet](https://testnet.binancefuture.com/en/futures/BTCUSDT)
 
 ## Risk Disclaimer
 

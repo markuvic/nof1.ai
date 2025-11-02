@@ -22,7 +22,7 @@
  */
 import { createClient } from "@libsql/client";
 import { createPinoLogger } from "@voltagent/logger";
-import { createGateClient } from "../services/gateClient";
+import { createExchangeClient } from "../services/exchanges";
 import "dotenv/config";
 
 const logger = createPinoLogger({
@@ -51,9 +51,17 @@ CREATE TABLE IF NOT EXISTS positions (
     unrealized_pnl REAL NOT NULL,
     leverage INTEGER NOT NULL,
     side TEXT NOT NULL,
+    profit_target REAL,
+    stop_loss REAL,
+    tp_order_id TEXT,
+    sl_order_id TEXT,
     entry_order_id TEXT,
     opened_at TEXT NOT NULL,
-    closed_at TEXT
+    closed_at TEXT,
+    confidence REAL,
+    risk_usd REAL,
+    peak_pnl_percent REAL DEFAULT 0,
+    partial_close_percentage REAL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS trading_signals (
@@ -101,12 +109,12 @@ CREATE TABLE IF NOT EXISTS trade_logs (
  * 平仓所有持仓
  */
 async function closeAllPositions(): Promise<void> {
-  const gateClient = createGateClient();
+  const exchangeClient = createExchangeClient();
   
   try {
     logger.info("📊 获取当前持仓...");
     
-    const positions = await gateClient.getPositions();
+    const positions = await exchangeClient.getPositions();
     const activePositions = positions.filter((p: any) => Number.parseInt(p.size || "0") !== 0);
     
     if (activePositions.length === 0) {
@@ -126,7 +134,7 @@ async function closeAllPositions(): Promise<void> {
       try {
         logger.info(`🔄 平仓中: ${symbol} ${side} ${quantity}张`);
         
-        await gateClient.placeOrder({
+        await exchangeClient.placeOrder({
           contract,
           size: -size, // 反向平仓
           price: 0, // 市价单
@@ -223,7 +231,7 @@ async function resetDatabase(): Promise<void> {
  * 同步持仓数据
  */
 async function syncPositions(): Promise<void> {
-  const gateClient = createGateClient();
+  const exchangeClient = createExchangeClient();
   const dbUrl = process.env.DATABASE_URL || "file:./.voltagent/trading.db";
   
   try {
@@ -234,7 +242,7 @@ async function syncPositions(): Promise<void> {
     });
     
     // 从 Gate.io 获取持仓
-    const positions = await gateClient.getPositions();
+    const positions = await exchangeClient.getPositions();
     const activePositions = positions.filter((p: any) => Number.parseInt(p.size || "0") !== 0);
     
     logger.info(`📊 Gate.io 当前持仓数: ${activePositions.length}`);
@@ -343,4 +351,3 @@ async function closeAndReset() {
 
 // 执行主函数
 closeAndReset();
-

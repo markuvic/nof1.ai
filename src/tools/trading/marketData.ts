@@ -21,7 +21,7 @@
  */
 import { createTool } from "@voltagent/core";
 import { z } from "zod";
-import { createGateClient } from "../../services/gateClient";
+import { createExchangeClient } from "../../services/exchanges";
 import { RISK_PARAMS } from "../../config/riskParams";
 
 /**
@@ -226,7 +226,7 @@ export const getMarketPriceTool = createTool({
     symbol: z.enum(RISK_PARAMS.TRADING_SYMBOLS).describe("币种代码"),
   }),
   execute: async ({ symbol }) => {
-    const client = createGateClient();
+    const client = createExchangeClient();
     const contract = `${symbol}_USDT`;
     
     const ticker = await client.getFuturesTicker(contract);
@@ -257,7 +257,7 @@ export const getTechnicalIndicatorsTool = createTool({
     limit: z.number().default(100).describe("K线数量"),
   }),
   execute: async ({ symbol, interval, limit }) => {
-    const client = createGateClient();
+    const client = createExchangeClient();
     const contract = `${symbol}_USDT`;
     
     const candles = await client.getFuturesCandles(contract, interval, limit);
@@ -282,7 +282,7 @@ export const getFundingRateTool = createTool({
     symbol: z.enum(RISK_PARAMS.TRADING_SYMBOLS).describe("币种代码"),
   }),
   execute: async ({ symbol }) => {
-    const client = createGateClient();
+    const client = createExchangeClient();
     const contract = `${symbol}_USDT`;
     
     const fundingRate = await client.getFundingRate(contract);
@@ -307,20 +307,22 @@ export const getOrderBookTool = createTool({
     limit: z.number().default(10).describe("深度档位数量"),
   }),
   execute: async ({ symbol, limit }) => {
-    const client = createGateClient();
+    const client = createExchangeClient();
     const contract = `${symbol}_USDT`;
     
     const orderBook = await client.getOrderBook(contract, limit);
     
-    const bids = orderBook.bids?.slice(0, limit).map((b: any) => ({
-      price: Number.parseFloat(b.p),
-      size: Number.parseFloat(b.s),
-    })) || [];
-    
-    const asks = orderBook.asks?.slice(0, limit).map((a: any) => ({
-      price: Number.parseFloat(a.p),
-      size: Number.parseFloat(a.s),
-    })) || [];
+    const parseSide = (entries: any[] = []) =>
+      entries.slice(0, limit).map((item: any) => {
+        const priceValue = item?.price ?? item?.p;
+        const sizeValue = item?.size ?? item?.s;
+        const price = typeof priceValue === "number" ? priceValue : Number.parseFloat(priceValue ?? "0");
+        const size = typeof sizeValue === "number" ? sizeValue : Number.parseFloat(sizeValue ?? "0");
+        return { price, size };
+      });
+
+    const bids = parseSide(orderBook.bids);
+    const asks = parseSide(orderBook.asks);
     
     return {
       symbol,
@@ -351,4 +353,3 @@ export const getOpenInterestTool = createTool({
     };
   },
 });
-

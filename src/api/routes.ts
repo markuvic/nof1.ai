@@ -22,7 +22,7 @@
 import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createClient } from "@libsql/client";
-import { createGateClient } from "../services/gateClient";
+import { createExchangeClient } from "../services/exchanges";
 import { createPinoLogger } from "@voltagent/logger";
 
 const logger = createPinoLogger({
@@ -57,8 +57,8 @@ export function createApiRoutes() {
    */
   app.get("/api/account", async (c) => {
     try {
-      const gateClient = createGateClient();
-      const account = await gateClient.getFuturesAccount();
+      const exchangeClient = createExchangeClient();
+      const account = await exchangeClient.getFuturesAccount();
       
       // 从数据库获取初始资金
       const initialResult = await dbClient.execute(
@@ -96,8 +96,8 @@ export function createApiRoutes() {
    */
   app.get("/api/positions", async (c) => {
     try {
-      const gateClient = createGateClient();
-      const gatePositions = await gateClient.getPositions();
+      const exchangeClient = createExchangeClient();
+      const gatePositions = await exchangeClient.getPositions();
       
       // 从数据库获取止损止盈信息
       const dbResult = await dbClient.execute("SELECT symbol, stop_loss, profit_target FROM positions");
@@ -321,7 +321,7 @@ export function createApiRoutes() {
       const symbolsParam = c.req.query("symbols") || "BTC,ETH,SOL,BNB,DOGE,XRP";
       const symbols = symbolsParam.split(",").map(s => s.trim());
       
-      const gateClient = createGateClient();
+      const exchangeClient = createExchangeClient();
       const prices: Record<string, number> = {};
       
       // 并发获取所有币种价格
@@ -329,7 +329,7 @@ export function createApiRoutes() {
         symbols.map(async (symbol) => {
           try {
             const contract = `${symbol}_USDT`;
-            const ticker = await gateClient.getFuturesTicker(contract);
+            const ticker = await exchangeClient.getFuturesTicker(contract);
             prices[symbol] = Number.parseFloat(ticker.last || "0");
           } catch (error: any) {
             logger.error(`获取 ${symbol} 价格失败:`, error);
@@ -346,4 +346,3 @@ export function createApiRoutes() {
 
   return app;
 }
-

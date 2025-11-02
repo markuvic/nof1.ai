@@ -23,7 +23,7 @@ import cron from "node-cron";
 import { createPinoLogger } from "@voltagent/logger";
 import { createClient } from "@libsql/client";
 import { createTradingAgent, generateTradingPrompt, getAccountRiskConfig } from "../agents/tradingAgent";
-import { createGateClient } from "../services/gateClient";
+import { createExchangeClient, getActiveExchangeId } from "../services/exchanges";
 import { getChinaTimeISO } from "../utils/timeUtils";
 import { RISK_PARAMS } from "../config/riskParams";
 import { getQuantoMultiplier } from "../utils/contractUtils";
@@ -71,26 +71,26 @@ function ensureRange(value: number, min: number, max: number, defaultValue?: num
 
 /**
  * 收集所有市场数据（包含多时间框架分析和时序数据）
- * 🔥 优化：增加数据验证和错误处理，返回时序数据用于提示词
+ * 优化：增加数据验证和错误处理，返回时序数据用于提示词
  */
 async function collectMarketData() {
-  const gateClient = createGateClient();
+  const exchangeClient = createExchangeClient();
   const marketData: Record<string, any> = {};
 
   for (const symbol of SYMBOLS) {
     try {
       const contract = `${symbol}_USDT`;
       
-      // 🔥 获取价格（带重试）
+      // 获取价格（带重试）
       let ticker: any = null;
       let retryCount = 0;
       const maxRetries = 2;
       
       while (retryCount <= maxRetries) {
         try {
-          ticker = await gateClient.getFuturesTicker(contract);
+          ticker = await exchangeClient.getFuturesTicker(contract);
           
-          // 🔥 验证价格数据有效性
+          // 验证价格数据有效性
           const price = Number.parseFloat(ticker.last || "0");
           if (price === 0 || !Number.isFinite(price)) {
             throw new Error(`价格无效: ${ticker.last}`);
@@ -109,12 +109,12 @@ async function collectMarketData() {
       }
       
       // 获取所有时间框架的K线数据
-      const candles1m = await gateClient.getFuturesCandles(contract, "1m", 60);
-      const candles3m = await gateClient.getFuturesCandles(contract, "3m", 60);
-      const candles5m = await gateClient.getFuturesCandles(contract, "5m", 100);
-      const candles15m = await gateClient.getFuturesCandles(contract, "15m", 96);
-      const candles30m = await gateClient.getFuturesCandles(contract, "30m", 90);
-      const candles1h = await gateClient.getFuturesCandles(contract, "1h", 120);
+      const candles1m = await exchangeClient.getFuturesCandles(contract, "1m", 60);
+      const candles3m = await exchangeClient.getFuturesCandles(contract, "3m", 60);
+      const candles5m = await exchangeClient.getFuturesCandles(contract, "5m", 100);
+      const candles15m = await exchangeClient.getFuturesCandles(contract, "15m", 96);
+      const candles30m = await exchangeClient.getFuturesCandles(contract, "30m", 90);
+      const candles1h = await exchangeClient.getFuturesCandles(contract, "1h", 120);
       
       // 计算每个时间框架的指标
       const indicators1m = calculateIndicators(candles1m);
@@ -133,7 +133,7 @@ async function collectMarketData() {
       // 使用5分钟K线数据作为主要指标（兼容性）
       const indicators = indicators5m;
       
-      // 🔥 验证技术指标有效性和数据完整性
+      // 验证技术指标有效性和数据完整性
       const dataTimestamp = new Date().toISOString();
       const dataQuality = {
         price: Number.isFinite(Number.parseFloat(ticker.last || "0")),
@@ -170,7 +170,7 @@ async function collectMarketData() {
       // 获取资金费率
       let fundingRate = 0;
       try {
-        const fr = await gateClient.getFundingRate(contract);
+        const fr = await exchangeClient.getFundingRate(contract);
         fundingRate = Number.parseFloat(fr.r || "0");
         if (!Number.isFinite(fundingRate)) {
           fundingRate = 0;
@@ -579,10 +579,10 @@ async function calculateSharpeRatio(): Promise<number> {
  * - 前端显示时需加上 unrealisedPnl
  */
 async function getAccountInfo() {
-  const gateClient = createGateClient();
+  const exchangeClient = createExchangeClient();
   
   try {
-    const account = await gateClient.getFuturesAccount();
+    const account = await exchangeClient.getFuturesAccount();
     
     // 从数据库获取初始资金
     const initialResult = await dbClient.execute(
@@ -641,18 +641,18 @@ async function getAccountInfo() {
 
 /**
  * 从 Gate.io 同步持仓到数据库
- * 🔥 优化：确保持仓数据的准确性和完整性
+ * 优化：确保持仓数据的准确性和完整性
  * 数据库中的持仓记录主要用于：
  * 1. 保存止损止盈订单ID等元数据
  * 2. 提供历史查询和监控页面展示
  * 实时持仓数据应该直接从 Gate.io 获取
  */
-async function syncPositionsFromGate(cachedPositions?: any[]) {
-  const gateClient = createGateClient();
+async function syncPositionsFromExchange(cachedPositions?: any[]) {
+  const exchangeClient = createExchangeClient();
   
   try {
     // 如果提供了缓存数据，使用缓存；否则重新获取
-    const gatePositions = cachedPositions || await gateClient.getPositions();
+    const gatePositions = cachedPositions || await exchangeClient.getPositions();
     const dbResult = await dbClient.execute("SELECT symbol, sl_order_id, tp_order_id, stop_loss, profit_target, entry_order_id, opened_at, peak_pnl_percent, partial_close_percentage FROM positions");
     const dbPositionsMap = new Map(
       dbResult.rows.map((row: any) => [row.symbol, row])
@@ -663,7 +663,7 @@ async function syncPositionsFromGate(cachedPositions?: any[]) {
     
     // 如果 Gate.io 返回0个持仓但数据库有持仓，可能是 API 延迟，不清空数据库
     if (activeGatePositions.length === 0 && dbResult.rows.length > 0) {
-      logger.warn(`⚠️  Gate.io 返回0个持仓，但数据库有 ${dbResult.rows.length} 个持仓，可能是 API 延迟，跳过同步`);
+      logger.warn(`Gate.io 返回0个持仓，但数据库有 ${dbResult.rows.length} 个持仓，可能是 API 延迟，跳过同步`);
       return;
     }
     
@@ -686,7 +686,7 @@ async function syncPositionsFromGate(cachedPositions?: any[]) {
       
       if (entryPrice === 0 || currentPrice === 0) {
         try {
-          const ticker = await gateClient.getFuturesTicker(pos.contract);
+          const ticker = await exchangeClient.getFuturesTicker(pos.contract);
           if (currentPrice === 0) {
             currentPrice = Number.parseFloat(ticker.markPrice || ticker.last || "0");
           }
@@ -730,7 +730,7 @@ async function syncPositionsFromGate(cachedPositions?: any[]) {
           entryOrderId, // 保留原有的订单ID
           dbPos?.opened_at || new Date().toISOString(), // 保留原有的开仓时间
           dbPos?.peak_pnl_percent || 0, // 保留峰值盈利
-          dbPos?.partial_close_percentage || 0, // 保留已平仓百分比 🔥 关键修复
+          dbPos?.partial_close_percentage || 0, // 保留已平仓百分比（关键修复）
         ],
       });
       
@@ -753,15 +753,15 @@ async function syncPositionsFromGate(cachedPositions?: any[]) {
  * @returns 格式化后的持仓数据
  */
 async function getPositions(cachedGatePositions?: any[]) {
-  const gateClient = createGateClient();
+  const exchangeClient = createExchangeClient();
   
   try {
     // 如果提供了缓存数据，使用缓存；否则重新获取
-    const gatePositions = cachedGatePositions || await gateClient.getPositions();
+    const gatePositions = cachedGatePositions || await exchangeClient.getPositions();
     
     // 从数据库获取持仓的开仓时间（数据库中保存了正确的开仓时间）
     const dbResult = await dbClient.execute("SELECT symbol, opened_at FROM positions");
-    const dbOpenedAtMap = new Map(
+      const dbOpenedAtMap = new Map(
       dbResult.rows.map((row: any) => [row.symbol, row.opened_at])
     );
     
@@ -772,7 +772,7 @@ async function getPositions(cachedGatePositions?: any[]) {
         const size = Number.parseInt(p.size || "0");
         const symbol = p.contract.replace("_USDT", "");
         
-        // 🔥 优先从数据库读取开仓时间，确保时间准确
+        // 优先从数据库读取开仓时间，确保时间准确
         let openedAt = dbOpenedAtMap.get(symbol);
         
         // 如果数据库中没有，尝试从Gate.io的create_time获取
@@ -1002,7 +1002,7 @@ async function fixHistoricalPnlRecords() {
 
       // 如果差异超过0.5 USDT，就需要修复
       if (pnlDiff > 0.5 || feeDiff > 0.1) {
-        logger.warn(`🔧 修复交易记录 ID=${id} (${symbol} ${side})`);
+        logger.warn(`修复交易记录 ID=${id} (${symbol} ${side})`);
         logger.warn(`  盈亏: ${recordedPnl.toFixed(2)} → ${correctPnl.toFixed(2)} USDT (差异: ${pnlDiff.toFixed(2)})`);
         
         // 更新数据库
@@ -1016,7 +1016,7 @@ async function fixHistoricalPnlRecords() {
     }
 
     if (fixedCount > 0) {
-      logger.info(`✅ 修复了 ${fixedCount} 条历史盈亏记录`);
+      logger.info(`修复了 ${fixedCount} 条历史盈亏记录`);
     }
   } catch (error) {
     logger.error("修复历史盈亏记录失败:", error as any);
@@ -1027,12 +1027,12 @@ async function fixHistoricalPnlRecords() {
  * 清仓所有持仓
  */
 async function closeAllPositions(reason: string): Promise<void> {
-  const gateClient = createGateClient();
+  const exchangeClient = createExchangeClient();
   
   try {
     logger.warn(`清仓所有持仓，原因: ${reason}`);
     
-    const positions = await gateClient.getPositions();
+    const positions = await exchangeClient.getPositions();
     const activePositions = positions.filter((p: any) => Number.parseInt(p.size || "0") !== 0);
     
     if (activePositions.length === 0) {
@@ -1045,7 +1045,7 @@ async function closeAllPositions(reason: string): Promise<void> {
       const symbol = contract.replace("_USDT", "");
       
       try {
-        await gateClient.placeOrder({
+        await exchangeClient.placeOrder({
           contract,
           size: -size,
           price: 0, // 市价单必须传 price: 0
@@ -1090,7 +1090,7 @@ async function checkAccountThresholds(accountInfo: any): Promise<boolean> {
 
 /**
  * 执行交易决策
- * 🔥 优化：增强错误处理和数据验证，确保数据实时准确
+ * 优化：增强错误处理和数据验证，确保数据实时准确
  */
 async function executeTradingDecision() {
   iterationCount++;
@@ -1152,12 +1152,12 @@ async function executeTradingDecision() {
     
     // 3. 同步持仓信息（优化：只调用一次API，避免重复）
     try {
-      const gateClient = createGateClient();
-      const rawGatePositions = await gateClient.getPositions();
+      const exchangeClient = createExchangeClient();
+      const rawGatePositions = await exchangeClient.getPositions();
       
       // 使用同一份数据进行处理和同步，避免重复调用API
       positions = await getPositions(rawGatePositions);
-      await syncPositionsFromGate(rawGatePositions);
+      await syncPositionsFromExchange(rawGatePositions);
       
       const dbPositions = await dbClient.execute("SELECT COUNT(*) as count FROM positions");
       const dbCount = (dbPositions.rows[0] as any).count;
@@ -1165,14 +1165,14 @@ async function executeTradingDecision() {
       if (positions.length !== dbCount) {
         logger.warn(`持仓同步不一致: Gate=${positions.length}, DB=${dbCount}`);
         // 再次同步，使用同一份数据
-        await syncPositionsFromGate(rawGatePositions);
+        await syncPositionsFromExchange(rawGatePositions);
       }
     } catch (error) {
       logger.error("持仓同步失败:", error as any);
     }
     
     // 4. ====== 强制风控检查（在AI执行前） ======
-    const gateClient = createGateClient();
+    const exchangeClient = createExchangeClient();
     
     for (const pos of positions) {
       const symbol = pos.symbol;
@@ -1228,14 +1228,14 @@ async function executeTradingDecision() {
       // b) 极端止损保护（防止爆仓，硬编码底线）
       // 只在极端情况下强制平仓，避免账户爆仓
       // 常规止损由AI决策，这里只是最后的安全网
-      const EXTREME_STOP_LOSS = -10; // 单笔亏损 -10% 强制平仓（专业风控底线）
+      const EXTREME_STOP_LOSS = -30; // 单笔亏损 -30% 强制平仓（专业风控底线）
       
       logger.info(`${symbol} 极端止损检查: 当前盈亏=${pnlPercent.toFixed(2)}%, 极端止损线=${EXTREME_STOP_LOSS}%`);
       
       if (pnlPercent <= EXTREME_STOP_LOSS) {
         shouldClose = true;
         closeReason = `触发极端止损保护 (${pnlPercent.toFixed(2)}% ≤ ${EXTREME_STOP_LOSS}%，防止爆仓)`;
-        logger.error(`🚨 ${closeReason}`);
+        logger.error(`${closeReason}`);
       }
       
       // c) 其他风控检查已移除，交由AI全权决策
@@ -1252,14 +1252,14 @@ async function executeTradingDecision() {
           const size = side === 'long' ? -pos.quantity : pos.quantity;
           
           // 1. 执行平仓订单
-          const order = await gateClient.placeOrder({
+          const order = await exchangeClient.placeOrder({
             contract,
             size,
             price: 0,
             reduceOnly: true,
           });
           
-          logger.info(`✅ 已下达强制平仓订单 ${symbol}，订单ID: ${order.id}`);
+          logger.info(`已下达强制平仓订单 ${symbol}，订单ID: ${order.id}`);
           
           // 2. 等待订单完成并获取成交信息（最多重试5次）
           let actualExitPrice = 0;
@@ -1272,7 +1272,7 @@ async function executeTradingDecision() {
             await new Promise(resolve => setTimeout(resolve, 500));
             
             try {
-              const orderStatus = await gateClient.getOrder(order.id?.toString() || "");
+              const orderStatus = await exchangeClient.getOrder(order.id?.toString() || "");
               
               if (orderStatus.status === 'finished') {
                 actualExitPrice = Number.parseFloat(orderStatus.fill_price || orderStatus.price || "0");
@@ -1308,7 +1308,7 @@ async function executeTradingDecision() {
           
           // 3. 记录到trades表（无论是否成功获取详细信息都要记录）
           try {
-            // 🔥 关键验证：检查盈亏计算是否正确
+            // 关键验证：检查盈亏计算是否正确
             const finalPrice = actualExitPrice || pos.current_price;
             const quantoMultiplier = await getQuantoMultiplier(contract);
             const notionalValue = finalPrice * actualQuantity * quantoMultiplier;
@@ -1319,7 +1319,7 @@ async function executeTradingDecision() {
             
             // 检测盈亏是否被错误地设置为名义价值
             if (Math.abs(pnl - notionalValue) < Math.abs(pnl - expectedPnl)) {
-              logger.error(`🚨 【强制平仓】检测到盈亏计算异常！`);
+              logger.error(`【强制平仓】检测到盈亏计算异常！`);
               logger.error(`  当前pnl: ${pnl.toFixed(2)} USDT 接近名义价值 ${notionalValue.toFixed(2)} USDT`);
               logger.error(`  预期pnl: ${expectedPnl.toFixed(2)} USDT`);
               logger.error(`  开仓价: ${pos.entry_price}, 平仓价: ${finalPrice}, 数量: ${actualQuantity}, 合约乘数: ${quantoMultiplier}`);
@@ -1352,9 +1352,9 @@ async function executeTradingDecision() {
                 orderFilled ? "filled" : "pending",
               ],
             });
-            logger.info(`✅ 已记录强制平仓交易到数据库: ${symbol}, 盈亏=${pnl.toFixed(2)} USDT, 原因=${closeReason}`);
+            logger.info(`已记录强制平仓交易到数据库: ${symbol}, 盈亏=${pnl.toFixed(2)} USDT, 原因=${closeReason}`);
           } catch (dbError: any) {
-            logger.error(`❌ 记录强制平仓交易失败: ${dbError.message}`);
+            logger.error(`记录强制平仓交易失败: ${dbError.message}`);
             // 即使数据库写入失败，也记录到日志以便后续补救
             logger.error(`缺失的交易记录: ${JSON.stringify({
               order_id: order.id,
@@ -1374,7 +1374,7 @@ async function executeTradingDecision() {
             args: [symbol],
           });
           
-          logger.info(`✅ 强制平仓完成 ${symbol}，原因：${closeReason}`);
+          logger.info(`强制平仓完成 ${symbol}，原因：${closeReason}`);
           
         } catch (closeError: any) {
           logger.error(`强制平仓失败 ${symbol}: ${closeError.message}`);
@@ -1395,7 +1395,7 @@ async function executeTradingDecision() {
     //   // 不影响主流程
     // }
     
-    // 5. 🔥 数据完整性最终检查
+    // 5. 数据完整性最终检查
     const dataValid = 
       marketData && Object.keys(marketData).length > 0 &&
       accountInfo && accountInfo.totalBalance > 0 &&
@@ -1445,7 +1445,7 @@ async function executeTradingDecision() {
       recentDecisions,
     });
     
-    // 🔥 输出完整提示词到日志
+    // 输出完整提示词到日志
     logger.info("【入参 - AI 提示词】");
     logger.info("=".repeat(80));
     logger.info(prompt);
@@ -1454,42 +1454,72 @@ async function executeTradingDecision() {
     const agent = createTradingAgent(intervalMinutes);
     
     try {
-      const response = await agent.generateText(prompt);
+      // 设置足够大的 maxOutputTokens 以避免输出被截断
+      // DeepSeek API 限制: max_tokens 范围为 [1, 8192]
+      const response = await agent.generateText(prompt, {
+        maxOutputTokens: 8192,
+        maxSteps: 20,
+        temperature: 0.6,
+      });
       
       // 从响应中提取AI的完整回复，不进行任何切分
       let decisionText = "";
       
+      // 添加调试日志，查看响应的原始结构
+      logger.debug(`响应类型: ${typeof response}`);
+      if (response && typeof response === 'object') {
+        logger.debug(`响应结构: ${JSON.stringify(Object.keys(response))}`);
+        const steps = (response as any).steps || [];
+        logger.debug(`步骤数量: ${steps.length}`);
+      }
+      
       if (typeof response === 'string') {
         decisionText = response;
+        logger.debug(`字符串响应长度: ${decisionText.length}`);
       } else if (response && typeof response === 'object') {
         const steps = (response as any).steps || [];
         
         // 收集所有AI的文本回复（完整保存，不切分）
         const allTexts: string[] = [];
         
-        for (const step of steps) {
+        for (let i = 0; i < steps.length; i++) {
+          const step = steps[i];
+          logger.debug(`处理步骤 ${i + 1}/${steps.length}`);
+          
           if (step.content) {
+            logger.debug(`  内容项数量: ${step.content.length}`);
             for (const item of step.content) {
-              if (item.type === 'text' && item.text && item.text.trim()) {
+              if (item.type === 'text' && item.text) {
+                const textLength = item.text.length;
+                logger.debug(`  提取文本内容，长度: ${textLength}`);
                 allTexts.push(item.text.trim());
               }
             }
+          }
+          
+          // 同时检查 step 的其他可能字段
+          if (step.text && typeof step.text === 'string') {
+            logger.debug(`  从 step.text 提取内容，长度: ${step.text.length}`);
+            allTexts.push(step.text.trim());
           }
         }
         
         // 完整合并所有文本，用双换行分隔
         if (allTexts.length > 0) {
           decisionText = allTexts.join('\n\n');
+          logger.debug(`合并后文本总长度: ${decisionText.length}`);
         }
         
         // 如果没有找到文本消息，尝试其他字段
         if (!decisionText) {
-          decisionText = (response as any).text || (response as any).message || "";
+          decisionText = (response as any).text || (response as any).message || (response as any).content || "";
+          logger.debug(`从备用字段提取，长度: ${decisionText.length}`);
         }
         
         // 如果还是没有文本回复，说明AI只是调用了工具，没有做出决策
         if (!decisionText && steps.length > 0) {
           decisionText = "AI调用了工具但未产生决策结果";
+          logger.warn("AI 响应中未找到任何文本内容");
         }
       }
       
@@ -1515,8 +1545,8 @@ async function executeTradingDecision() {
       });
       
       // Agent 执行后重新同步持仓数据（优化：只调用一次API）
-      const updatedRawPositions = await gateClient.getPositions();
-      await syncPositionsFromGate(updatedRawPositions);
+      const updatedRawPositions = await exchangeClient.getPositions();
+      await syncPositionsFromExchange(updatedRawPositions);
       const updatedPositions = await getPositions(updatedRawPositions);
       
       // 重新获取更新后的账户信息，包含最新的未实现盈亏
@@ -1548,15 +1578,15 @@ async function executeTradingDecision() {
     } catch (agentError) {
       logger.error("Agent 执行失败:", agentError as any);
       try {
-        await syncPositionsFromGate();
+        await syncPositionsFromExchange();
       } catch (syncError) {
         logger.error("同步失败:", syncError as any);
       }
     }
     
-    // 🔥 每个周期结束时自动修复历史盈亏记录
+    // 每个周期结束时自动修复历史盈亏记录
     try {
-      logger.info("🔧 检查并修复历史盈亏记录...");
+      logger.info("检查并修复历史盈亏记录...");
       await fixHistoricalPnlRecords();
     } catch (fixError) {
       logger.error("修复历史盈亏失败:", fixError as any);
@@ -1566,7 +1596,7 @@ async function executeTradingDecision() {
   } catch (error) {
     logger.error("交易循环执行失败:", error as any);
     try {
-      await syncPositionsFromGate();
+      await syncPositionsFromExchange();
     } catch (recoveryError) {
       logger.error("恢复失败:", recoveryError as any);
     }
@@ -1604,6 +1634,7 @@ export function startTradingLoop() {
   
   logger.info(`启动交易循环，间隔: ${intervalMinutes} 分钟`);
   logger.info(`支持币种: ${SYMBOLS.join(", ")}`);
+  logger.info(`当前交易所: ${getActiveExchangeId()}`);
   
   // 立即执行一次
   executeTradingDecision();
@@ -1630,4 +1661,3 @@ export function setTradingStartTime(time: Date) {
 export function setIterationCount(count: number) {
   iterationCount = count;
 }
-

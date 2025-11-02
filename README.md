@@ -93,15 +93,28 @@ INITIAL_BALANCE=2000            # 初始资金(USDT)
 # 数据库
 DATABASE_URL=file:./.voltagent/trading.db
 
-# Gate.io API 凭证(建议先使用测试网!)
+# 交易所配置
+EXCHANGE_PROVIDER=gate          # 支持 gate | binance
+
+# Gate.io API 凭证 (EXCHANGE_PROVIDER=gate 时必填)
 GATE_API_KEY=your_api_key_here
 GATE_API_SECRET=your_api_secret_here
 GATE_USE_TESTNET=true
+
+# Binance API 凭证 (EXCHANGE_PROVIDER=binance 时必填)
+BINANCE_API_KEY=your_binance_key
+BINANCE_API_SECRET=your_binance_secret
+BINANCE_USE_TESTNET=true
+BINANCE_RECV_WINDOW=5000           # Binance 时间窗口（毫秒）
+BINANCE_TIMEOUT_MS=15000           # Binance 请求超时时间（毫秒）
+BINANCE_MAX_RETRIES=2              # Binance 请求最大重试次数
+BINANCE_POSITION_MODE=             # Binance 持仓模式（ONE_WAY/HEDGE，可留空自动探测）
 
 # AI 模型提供商（OpenAI 兼容 API）
 OPENAI_API_KEY=your_api_key_here
 OPENAI_BASE_URL=https://openrouter.ai/api/v1  # 可选
 AI_MODEL_NAME=deepseek/deepseek-v3.2-exp      # 模型名称
+AI_MAX_OUTPUT_TOKENS=4096                    # AI 输出最大 Token（避免回复被截断）
 
 # 账户回撤风控配置
 # 当账户资产相比峰值回撤达到以下百分比时的风控措施：
@@ -116,6 +129,8 @@ ACCOUNT_DRAWDOWN_FORCE_CLOSE_PERCENT=50      # 强制平仓阈值：自动平掉
 - DeepSeek: https://platform.deepseek.com/api_keys
 - Gate.io 测试网: https://www.gate.io/testnet
 - Gate.io 正式网: https://www.gate.io/myaccount/api_key_manage
+- Binance 测试网: https://testnet.binancefuture.com
+- Binance 正式网: https://www.binance.com/cn/futures-api
 
 ### 数据库初始化
 
@@ -208,6 +223,8 @@ npm run trading:start
 - [OpenRouter 模型目录](https://openrouter.ai/models)
 - [Gate.io API 参考](https://www.gate.io/docs/developers/apiv4/)
 - [Gate.io 测试网](https://www.gate.io/testnet)
+- [Binance Futures API](https://binance-docs.github.io/apidocs/futures/en/)
+- [Binance Futures Testnet](https://testnet.binancefuture.com/en/futures/BTCUSDT)
 
 ## 参与贡献
 

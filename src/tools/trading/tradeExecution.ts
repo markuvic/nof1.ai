@@ -21,7 +21,7 @@
  */
 import { createTool } from "@voltagent/core";
 import { z } from "zod";
-import { createGateClient } from "../../services/gateClient";
+import { createExchangeClient } from "../../services/exchanges";
 import { createClient } from "@libsql/client";
 import { createPinoLogger } from "@voltagent/logger";
 import { getChinaTimeISO } from "../../utils/timeUtils";
@@ -53,7 +53,7 @@ export const openPositionTool = createTool({
     // 开仓时不设置止盈止损，由 AI 在每个周期主动决策
     const stopLoss = undefined;
     const takeProfit = undefined;
-    const client = createGateClient();
+    const client = createExchangeClient();
     const contract = `${symbol}_USDT`;
     
     try {
@@ -120,30 +120,31 @@ export const openPositionTool = createTool({
       }
       
       // 4. 检查账户回撤（从数据库获取初始净值和峰值净值）
-      const initialBalanceResult = await dbClient.execute(
-        "SELECT total_value FROM account_history ORDER BY timestamp ASC LIMIT 1"
-      );
-      const initialBalance = initialBalanceResult.rows[0]
-        ? Number.parseFloat(initialBalanceResult.rows[0].total_value as string)
-        : totalBalance;
-      
-      const peakBalanceResult = await dbClient.execute(
-        "SELECT MAX(total_value) as peak FROM account_history"
-      );
-      const peakBalance = peakBalanceResult.rows[0]?.peak 
-        ? Number.parseFloat(peakBalanceResult.rows[0].peak as string)
-        : totalBalance;
-      
-      const drawdownFromPeak = peakBalance > 0 
-        ? ((peakBalance - totalBalance) / peakBalance) * 100 
-        : 0;
-      
-      if (drawdownFromPeak >= RISK_PARAMS.ACCOUNT_DRAWDOWN_NO_NEW_POSITION_PERCENT) {
-        return {
-          success: false,
-          message: `账户回撤已达 ${drawdownFromPeak.toFixed(2)}% ≥ ${RISK_PARAMS.ACCOUNT_DRAWDOWN_NO_NEW_POSITION_PERCENT}%，触发风控保护，禁止新开仓`,
-        };
-      }
+      // 注释：已移除回撤10%禁止开仓的限制
+      // const initialBalanceResult = await dbClient.execute(
+      //   "SELECT total_value FROM account_history ORDER BY timestamp ASC LIMIT 1"
+      // );
+      // const initialBalance = initialBalanceResult.rows[0]
+      //   ? Number.parseFloat(initialBalanceResult.rows[0].total_value as string)
+      //   : totalBalance;
+      // 
+      // const peakBalanceResult = await dbClient.execute(
+      //   "SELECT MAX(total_value) as peak FROM account_history"
+      // );
+      // const peakBalance = peakBalanceResult.rows[0]?.peak 
+      //   ? Number.parseFloat(peakBalanceResult.rows[0].peak as string)
+      //   : totalBalance;
+      // 
+      // const drawdownFromPeak = peakBalance > 0 
+      //   ? ((peakBalance - totalBalance) / peakBalance) * 100 
+      //   : 0;
+      // 
+      // if (drawdownFromPeak >= RISK_PARAMS.ACCOUNT_DRAWDOWN_NO_NEW_POSITION_PERCENT) {
+      //   return {
+      //     success: false,
+      //     message: `账户回撤已达 ${drawdownFromPeak.toFixed(2)}% ≥ ${RISK_PARAMS.ACCOUNT_DRAWDOWN_NO_NEW_POSITION_PERCENT}%，触发风控保护，禁止新开仓`,
+      //   };
+      // }
       
       // 5. 检查总敞口（不超过账户净值的15倍）
       let currentTotalExposure = 0;
@@ -201,8 +202,10 @@ export const openPositionTool = createTool({
         if (orderBook && orderBook.bids && orderBook.bids.length > 0) {
           // 计算买单深度（前5档）
           const bidDepth = orderBook.bids.slice(0, 5).reduce((sum: number, bid: any) => {
-            const price = Number.parseFloat(bid.p);
-            const size = Number.parseFloat(bid.s);
+            const priceValue = bid?.price ?? bid?.p;
+            const sizeValue = bid?.size ?? bid?.s;
+            const price = typeof priceValue === "number" ? priceValue : Number.parseFloat(priceValue ?? "0");
+            const size = typeof sizeValue === "number" ? sizeValue : Number.parseFloat(sizeValue ?? "0");
             return sum + price * size;
           }, 0);
           
@@ -484,9 +487,9 @@ export const openPositionTool = createTool({
           retryCount++;
           
           if (retryCount >= maxRetries) {
-            logger.error(`❌ 警告：Gate.io 查询显示持仓为0，但订单状态为 ${finalOrderStatus}`);
+            logger.error(`❌ 警告：交易所返回持仓为0，但订单状态为 ${finalOrderStatus}`);
             logger.error(`订单ID: ${order.id}, 成交数量: ${actualFillSize}, 计算数量: ${finalQuantity}`);
-            logger.error(`可能原因：Gate.io API 延迟或持仓需要更长时间更新`);
+            logger.error(`可能原因：交易所 API 存在延迟或持仓需要更长时间更新`);
           }
         } catch (error) {
           logger.warn(`获取持仓失败（重试${retryCount + 1}/${maxRetries}）: ${error}`);
@@ -594,7 +597,7 @@ export const closePositionTool = createTool({
     percentage: z.number().min(1).max(100).default(100).describe("平仓百分比（1-100）"),
   }),
   execute: async ({ symbol, percentage }) => {
-    const client = createGateClient();
+    const client = createExchangeClient();
     const contract = `${symbol}_USDT`;
     
     try {
@@ -919,7 +922,7 @@ export const cancelOrderTool = createTool({
     orderId: z.string().describe("订单ID"),
   }),
   execute: async ({ orderId }) => {
-    const client = createGateClient();
+    const client = createExchangeClient();
     
     try {
       await client.cancelOrder(orderId);
@@ -938,4 +941,3 @@ export const cancelOrderTool = createTool({
     }
   },
 });
-

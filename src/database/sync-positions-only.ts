@@ -23,7 +23,7 @@
 import "dotenv/config";
 import { createClient } from "@libsql/client";
 import { createPinoLogger } from "@voltagent/logger";
-import { createGateClient } from "../services/gateClient";
+import { createExchangeClient } from "../services/exchanges";
 
 const logger = createPinoLogger({
   name: "sync-positions",
@@ -64,16 +64,22 @@ async function syncPositionsOnly() {
           sl_order_id TEXT,
           entry_order_id TEXT,
           opened_at TEXT NOT NULL,
-          closed_at TEXT
+          closed_at TEXT,
+          confidence REAL,
+          risk_usd REAL,
+          peak_pnl_percent REAL DEFAULT 0,
+          partial_close_percentage REAL DEFAULT 0
         )
       `);
       logger.info("✅ 数据库表创建完成");
     }
     
     // 3. 从 Gate.io 获取持仓
-    const gateClient = createGateClient();
-    const positions = await gateClient.getPositions();
-    const activePositions = positions.filter(p => Number.parseInt(p.size || "0") !== 0);
+    const exchangeClient = createExchangeClient();
+    const positions = await exchangeClient.getPositions();
+    const activePositions = positions.filter(
+      (p: any) => Number.parseInt(p.size || "0") !== 0,
+    );
     
     logger.info(`\n📊 Gate.io 当前持仓数: ${activePositions.length}`);
     
@@ -127,11 +133,11 @@ async function syncPositionsOnly() {
     logger.info("\n✅ 持仓同步完成");
     
   } catch (error) {
-    logger.error("❌ 同步失败:", error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`❌ 同步失败: ${errMsg}`);
     process.exit(1);
   }
 }
 
 // 执行同步
 syncPositionsOnly();
-

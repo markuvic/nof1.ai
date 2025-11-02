@@ -22,14 +22,15 @@
 // @ts-ignore - gate-api 的类型定义可能不完整
 import * as GateApi from "gate-api";
 import { createPinoLogger } from "@voltagent/logger";
-import { RISK_PARAMS } from "../config/riskParams";
+import { RISK_PARAMS } from "../../config/riskParams";
+import { ExchangeClient, ExchangeOrderParams } from "./types";
 
 const logger = createPinoLogger({
   name: "gate-client",
   level: "info",
 });
 
-export class GateClient {
+export class GateExchangeClient implements ExchangeClient {
   private readonly client: any;
   private readonly futuresApi: any;
   private readonly spotApi: any;
@@ -182,16 +183,7 @@ export class GateClient {
   /**
    * 下单 - 开仓或平仓
    */
-  async placeOrder(params: {
-    contract: string;
-    size: number;
-    price?: number;
-    tif?: string;
-    reduceOnly?: boolean;
-    autoSize?: string;
-    stopLoss?: number;
-    takeProfit?: number;
-  }) {
+  async placeOrder(params: ExchangeOrderParams) {
     // 验证并调整数量（在 try 外部定义，以便在 catch 中使用）
     let adjustedSize = params.size;
     
@@ -571,12 +563,12 @@ export class GateClient {
 /**
  * 全局 GATE 客户端实例（单例模式）
  */
-let gateClientInstance: GateClient | null = null;
+let gateClientInstance: GateExchangeClient | null = null;
 
 /**
  * 创建全局 GATE 客户端实例（单例模式）
  */
-export function createGateClient(): GateClient {
+export function createGateExchangeClient(): GateExchangeClient {
   // 如果已存在实例，直接返回
   if (gateClientInstance) {
     return gateClientInstance;
@@ -590,6 +582,6 @@ export function createGateClient(): GateClient {
   }
 
   // 创建并缓存实例
-  gateClientInstance = new GateClient(apiKey, apiSecret);
+  gateClientInstance = new GateExchangeClient(apiKey, apiSecret);
   return gateClientInstance;
 }

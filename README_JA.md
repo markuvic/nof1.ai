@@ -182,10 +182,20 @@ GATE_API_KEY=your_api_key_here
 GATE_API_SECRET=your_api_secret_here
 GATE_USE_TESTNET=true
 
+# Binance API 設定 (EXCHANGE_PROVIDER=binance の場合必須)
+BINANCE_API_KEY=your_binance_key
+BINANCE_API_SECRET=your_binance_secret
+BINANCE_USE_TESTNET=true
+BINANCE_RECV_WINDOW=5000           # Binance API 時間ウィンドウ（ミリ秒、timestamp エラー防止）
+BINANCE_TIMEOUT_MS=15000           # Binance リクエストのタイムアウト（ミリ秒）
+BINANCE_MAX_RETRIES=2              # Binance リクエストの最大リトライ回数
+BINANCE_POSITION_MODE=             # Binance ポジションモード（ONE_WAY/HEDGE、空の場合は自動判定）
+
 # AI モデルプロバイダー (OpenAI 互換 API)
 OPENAI_API_KEY=your_api_key_here
 OPENAI_BASE_URL=https://openrouter.ai/api/v1  # オプション、OpenRouter、OpenAI、DeepSeek などをサポート
 AI_MODEL_NAME=deepseek/deepseek-v3.2-exp      # モデル名
+AI_MAX_OUTPUT_TOKENS=4096                    # AI 出力の最大トークン数（切り捨て防止）
 
 # アカウントドローダウンリスク管理
 # 口座資産がピーク時から以下の割合で減少した際のリスク管理措置：
@@ -238,7 +248,9 @@ open-nof1.ai/
 │   ├── scheduler/
 │   │   └── tradingLoop.ts            # 取引ループオーケストレーション
 │   ├── services/
-│   │   ├── gateClient.ts             # Gate.io API クライアントラッパー
+│   │   ├── exchanges/                # 取引所クライアント実装
+│   │   │   ├── gateExchangeClient.ts # Gate.io API クライアントラッパー
+│   │   │   └── index.ts              # 取引所ファクトリと共通型
 │   │   └── multiTimeframeAnalysis.ts # マルチタイムフレームデータアグリゲーター
 │   ├── tools/
 │   │   └── trading/                  # VoltAgent ツール実装
@@ -279,12 +291,21 @@ open-nof1.ai/
 | `MAX_HOLDING_HOURS` | 最大保有時間(時間) | 36 | いいえ |
 | `INITIAL_BALANCE` | 初期資金(USDT) | 2000 | いいえ |
 | `DATABASE_URL` | SQLite データベースファイルパス | file:./.voltagent/trading.db | いいえ |
-| `GATE_API_KEY` | Gate.io API キー | - | はい |
-| `GATE_API_SECRET` | Gate.io API シークレット | - | はい |
-| `GATE_USE_TESTNET` | テストネット環境を使用 | true | いいえ |
+| `EXCHANGE_PROVIDER` | 取引所の選択：`gate` または `binance` | gate | いいえ |
+| `GATE_API_KEY` | Gate.io API キー (`EXCHANGE_PROVIDER=gate` の場合必須) | - | 条件 |
+| `GATE_API_SECRET` | Gate.io API シークレット (`EXCHANGE_PROVIDER=gate` の場合必須) | - | 条件 |
+| `GATE_USE_TESTNET` | Gate.io テストネットを使用 | true | いいえ |
+| `BINANCE_API_KEY` | Binance Futures API キー (`EXCHANGE_PROVIDER=binance` の場合必須) | - | 条件 |
+| `BINANCE_API_SECRET` | Binance Futures API シークレット (`EXCHANGE_PROVIDER=binance` の場合必須) | - | 条件 |
+| `BINANCE_USE_TESTNET` | Binance テストネットを使用 | true | いいえ |
+| `BINANCE_RECV_WINDOW` | Binance API 時間ウィンドウ(ms) | 5000 | いいえ |
+| `BINANCE_TIMEOUT_MS` | Binance リクエストタイムアウト(ms) | 15000 | いいえ |
+| `BINANCE_MAX_RETRIES` | Binance リクエスト最大リトライ回数 | 2 | いいえ |
+| `BINANCE_POSITION_MODE` | Binance ポジションモード（ONE_WAY/HEDGE、空欄なら自動判定） | - | いいえ |
 | `OPENAI_API_KEY` | OpenAI 互換 API キー | - | はい |
 | `OPENAI_BASE_URL` | API ベース URL | https://openrouter.ai/api/v1 | いいえ |
 | `AI_MODEL_NAME` | モデル名 | deepseek/deepseek-v3.2-exp | いいえ |
+| `AI_MAX_OUTPUT_TOKENS` | AI 出力の最大トークン数（切り捨て防止） | 4096 | いいえ |
 | `ACCOUNT_DRAWDOWN_WARNING_PERCENT` | アカウントドローダウン警告しきい値：リスク警告を発する(%) | 20 | いいえ |
 | `ACCOUNT_DRAWDOWN_NO_NEW_POSITION_PERCENT` | 新規注文停止しきい値：新規ポジションの開設を停止、決済のみ許可(%) | 30 | いいえ |
 | `ACCOUNT_DRAWDOWN_FORCE_CLOSE_PERCENT` | 強制決済しきい値：すべてのポジションを自動的に決済し、残り資金を保護(%) | 50 | いいえ |
@@ -827,4 +848,3 @@ Conventional Commits 規約に従います:
 [![Star History Chart](https://api.star-history.com/svg?repos=195440/open-nof1.ai&type=Date)](https://star-history.com/#195440/open-nof1.ai&Date)
 
 </div>
-

@@ -7,6 +7,7 @@
 [![VoltAgent](https://img.shields.io/badge/Framework-VoltAgent-purple.svg)](https://voltagent.dev)
 [![OpenAI Compatible](https://img.shields.io/badge/AI-OpenAI_Compatible-orange.svg)](https://openrouter.ai)
 [![Gate.io](https://img.shields.io/badge/Exchange-Gate.io-00D4AA.svg)](https://www.gate.io)
+[![Binance](https://img.shields.io/badge/Exchange-Binance-FAA81A.svg)](https://www.binance.com/zh-CN/futures)
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Node.js](https://img.shields.io/badge/Runtime-Node.js%2020+-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
@@ -20,7 +21,7 @@
 
 open-nof1.ai 是一个 AI 驱动的加密货币自动交易系统，将大语言模型智能与量化交易实践深度融合。系统基于 Agent 框架构建，通过赋予 AI 完全的市场分析和交易决策自主权，实现真正的智能化交易。
 
-本系统采用**最小人工干预**的设计理念，摒弃传统的硬编码交易规则，让 AI 模型基于原始市场数据进行自主学习和决策。系统集成 Gate.io 交易所（支持测试网和正式网），提供完整的永续合约交易能力，覆盖 BTC、ETH、SOL 等主流加密货币，支持从数据采集、智能分析、风险管理到交易执行的全流程自动化。
+本系统采用**最小人工干预**的设计理念，摒弃传统的硬编码交易规则，让 AI 模型基于原始市场数据进行自主学习和决策。系统集成 Gate.io 与 Binance 永续合约交易所（均支持测试网和正式网），提供完整的永续合约交易能力，覆盖 BTC、ETH、SOL 等主流加密货币，支持从数据采集、智能分析、风险管理到交易执行的全流程自动化。
 
 ![open-nof1.ai](./public/image.png)
 
@@ -58,11 +59,11 @@ open-nof1.ai 是一个 AI 驱动的加密货币自动交易系统，将大语言
 └─────────┬───────────────────────────────────┬───────────┘
           │                                   │
 ┌─────────┴──────────┐            ┌───────────┴───────────┐
-│    Trading Tools   │            │   Gate.io API Client  │
-│                    │            │                       │
-│ - Market Data      │◄───────────┤ - Order Management    │
-│ - Account Info     │            │ - Position Query      │
-│ - Trade Execution  │            │ - Market Data Stream  │
+│    Trading Tools   │            │ 交易所 API 客户端      │
+│                    │            │  (Gate.io / Binance)  │
+│ - Market Data      │◄───────────┤ - 订单管理            │
+│ - Account Info     │            │ - 持仓查询            │
+│ - Trade Execution  │            │ - 行情数据流          │
 └─────────┬──────────┘            └───────────────────────┘
           │
 ┌─────────┴──────────┐
@@ -80,7 +81,7 @@ open-nof1.ai 是一个 AI 驱动的加密货币自动交易系统，将大语言
 |------|------|------|
 | 框架 | [VoltAgent](https://voltagent.dev) | AI Agent 编排与管理 |
 | AI 提供商 | OpenAI 兼容 API | 支持 OpenRouter、OpenAI、DeepSeek 等兼容供应商 |
-| 交易所 | [Gate.io](https://www.gate.io) | 加密货币交易(测试网 & 正式网) |
+| 交易所 | [Gate.io](https://www.gate.io)、[Binance Futures](https://www.binance.com/zh-CN/futures) | 加密货币交易(测试网 & 正式网) |
 | 数据库 | LibSQL (SQLite) | 本地数据持久化 |
 | Web 服务器 | Hono | 高性能 HTTP 框架 |
 | 开发语言 | TypeScript | 类型安全开发 |
@@ -111,7 +112,7 @@ open-nof1.ai 是一个 AI 驱动的加密货币自动交易系统，将大语言
 - **杠杆范围**: 1倍至10倍(可配置)
 - **订单类型**: 市价单、止损、止盈
 - **持仓方向**: 做多和做空
-- **实时执行**: 通过 Gate.io API 亚秒级下单
+- **实时执行**: 通过交易所 API（Gate.io / Binance）亚秒级下单
 
 ### 实时监控界面
 
@@ -177,15 +178,27 @@ INITIAL_BALANCE=2000            # 初始资金(USDT)
 # 数据库
 DATABASE_URL=file:./.voltagent/trading.db
 
-# Gate.io API 凭证(建议先使用测试网!)
+# 交易所配置
+EXCHANGE_PROVIDER=gate          # 支持 gate | binance
+
+# Gate.io API 凭证 (EXCHANGE_PROVIDER=gate 时必填)
 GATE_API_KEY=your_api_key_here
 GATE_API_SECRET=your_api_secret_here
 GATE_USE_TESTNET=true
+
+# Binance API 凭证 (EXCHANGE_PROVIDER=binance 时必填)
+BINANCE_API_KEY=your_binance_key
+BINANCE_API_SECRET=your_binance_secret
+BINANCE_USE_TESTNET=true
+BINANCE_RECV_WINDOW=5000           # Binance API 时间窗口（毫秒，避免 timestamp 错误）
+BINANCE_TIMEOUT_MS=15000           # Binance 请求超时时间（毫秒，可视网络情况调整）
+BINANCE_MAX_RETRIES=2              # Binance 请求最大重试次数
 
 # AI 模型提供商（OpenAI 兼容 API）
 OPENAI_API_KEY=your_api_key_here
 OPENAI_BASE_URL=https://openrouter.ai/api/v1  # 可选，支持 OpenRouter、OpenAI、DeepSeek 等
 AI_MODEL_NAME=deepseek/deepseek-v3.2-exp      # 模型名称
+AI_MAX_OUTPUT_TOKENS=4096                    # AI 输出最大 Token（避免回复被截断）
 ```
 
 **API 密钥获取**:
@@ -194,6 +207,8 @@ AI_MODEL_NAME=deepseek/deepseek-v3.2-exp      # 模型名称
 - DeepSeek: https://platform.deepseek.com/api_keys
 - Gate.io 测试网: https://www.gate.io/testnet
 - Gate.io 正式网: https://www.gate.io/myaccount/api_key_manage
+- Binance 测试网: https://testnet.binancefuture.com
+- Binance 正式网: https://www.binance.com/zh-CN/futures/api-center
 
 ### 数据库初始化
 
@@ -232,7 +247,9 @@ open-nof1.ai/
 │   ├── scheduler/
 │   │   └── tradingLoop.ts            # 交易循环编排
 │   ├── services/
-│   │   ├── gateClient.ts             # Gate.io API 客户端封装
+│   │   ├── exchanges/                # 交易所客户端实现
+│   │   │   ├── gateExchangeClient.ts # Gate.io API 客户端封装
+│   │   │   └── index.ts              # 交易所工厂与通用类型
 │   │   └── multiTimeframeAnalysis.ts # 多时间框架数据聚合器
 │   ├── tools/
 │   │   └── trading/                  # VoltAgent 工具实现
@@ -273,12 +290,21 @@ open-nof1.ai/
 | `MAX_HOLDING_HOURS` | 最大持有时长(小时) | 36 | 否 |
 | `INITIAL_BALANCE` | 初始资金(USDT) | 2000 | 否 |
 | `DATABASE_URL` | SQLite 数据库文件路径 | file:./.voltagent/trading.db | 否 |
-| `GATE_API_KEY` | Gate.io API 密钥 | - | 是 |
-| `GATE_API_SECRET` | Gate.io API 密钥 | - | 是 |
-| `GATE_USE_TESTNET` | 使用测试网环境 | true | 否 |
+| `EXCHANGE_PROVIDER` | 交易所选择：`gate` 或 `binance` | gate | 否 |
+| `GATE_API_KEY` | Gate.io API 密钥 (`EXCHANGE_PROVIDER=gate` 时必填) | - | 条件 |
+| `GATE_API_SECRET` | Gate.io API 密钥 (`EXCHANGE_PROVIDER=gate` 时必填) | - | 条件 |
+| `GATE_USE_TESTNET` | 使用 Gate.io 测试网 | true | 否 |
+| `BINANCE_API_KEY` | Binance Futures API 密钥 (`EXCHANGE_PROVIDER=binance` 时必填) | - | 条件 |
+| `BINANCE_API_SECRET` | Binance Futures API 密钥 (`EXCHANGE_PROVIDER=binance` 时必填) | - | 条件 |
+| `BINANCE_USE_TESTNET` | 使用 Binance 测试网 | true | 否 |
+| `BINANCE_RECV_WINDOW` | Binance API 时间窗口(ms)，避免 timestamp 超限 | 5000 | 否 |
+| `BINANCE_TIMEOUT_MS` | Binance 请求超时时间(ms) | 15000 | 否 |
+| `BINANCE_MAX_RETRIES` | Binance 请求最大重试次数 | 2 | 否 |
+| `BINANCE_POSITION_MODE` | Binance 持仓模式（ONE_WAY/HEDGE，留空自动探测） | - | 否 |
 | `OPENAI_API_KEY` | OpenAI 兼容的 API 密钥 | - | 是 |
 | `OPENAI_BASE_URL` | API 基础地址 | https://openrouter.ai/api/v1 | 否 |
 | `AI_MODEL_NAME` | 模型名称 | deepseek/deepseek-v3.2-exp | 否 |
+| `AI_MAX_OUTPUT_TOKENS` | AI 输出最大 Token（防止回复被截断） | 4096 | 否 |
 | `ACCOUNT_DRAWDOWN_WARNING_PERCENT` | 账户回撤警告阈值：发出风险警告提醒(%) | 20 | 否 |
 | `ACCOUNT_DRAWDOWN_NO_NEW_POSITION_PERCENT` | 禁止开仓阈值：停止开新仓位，只允许平仓(%) | 30 | 否 |
 | `ACCOUNT_DRAWDOWN_FORCE_CLOSE_PERCENT` | 强制平仓阈值：自动平掉所有仓位，保护剩余资金(%) | 50 | 否 |
@@ -544,12 +570,13 @@ npm run trading:start
 
 #### API 凭证未配置
 
-**错误**: `GATE_API_KEY and GATE_API_SECRET must be set in environment variables`
+**错误**: `Exchange API credentials are missing (检查 GATE_API_* 或 BINANCE_API_*)`
 
 **解决方案**:
 ```bash
 # 验证 .env 文件
 cat .env | grep GATE_API
+cat .env | grep BINANCE_API
 
 # 编辑配置
 nano .env
@@ -735,6 +762,8 @@ npm run trading:start
 - [DeepSeek API 文档](https://platform.deepseek.com/api-docs/)
 - [Gate.io API 参考](https://www.gate.io/docs/developers/apiv4/)
 - [Gate.io 测试网](https://www.gate.io/testnet)
+- [Binance Futures API 参考](https://binance-docs.github.io/apidocs/futures/zh/)
+- [Binance Futures 测试网](https://testnet.binancefuture.com/zh-CN/futures/BTCUSDT)
 
 ## 风险声明
 
