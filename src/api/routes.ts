@@ -109,35 +109,115 @@ export function createApiRoutes() {
         dbResult.rows.map((row: any) => [row.symbol, row])
       );
       
-      // 过滤并格式化持仓
-      const positions = gatePositions
-        .filter((p: any) => Number.parseInt(p.size || "0") !== 0)
-        .map((p: any) => {
-          const size = Number.parseInt(p.size || "0");
-          const symbol = p.contract.replace("_USDT", "");
-          const dbPos = dbPositionsMap.get(symbol);
-          const entryPrice = Number.parseFloat(p.entryPrice || "0");
-          const quantity = Math.abs(size);
-          const leverage = Number.parseInt(p.leverage || "1");
-          
-          // 开仓价值（保证金）: 从Gate.io API直接获取
-          const openValue = Number.parseFloat(p.margin || "0");
-          
-          return {
-            symbol,
-            quantity,
-            entryPrice,
-            currentPrice: Number.parseFloat(p.markPrice || "0"),
-            liquidationPrice: Number.parseFloat(p.liqPrice || "0"),
-            unrealizedPnl: Number.parseFloat(p.unrealisedPnl || "0"),
-            leverage,
-            side: size > 0 ? "long" : "short",
-            openValue,
-            profitTarget: dbPos?.profit_target ? Number(dbPos.profit_target) : null,
-            stopLoss: dbPos?.stop_loss ? Number(dbPos.stop_loss) : null,
-            openedAt: p.create_time || new Date().toISOString(),
-          };
+      const toNumber = (value: unknown, fallback = 0) => {
+        if (value === null || value === undefined) {
+          return fallback;
+        }
+        if (typeof value === "number") {
+          return Number.isFinite(value) ? value : fallback;
+        }
+        if (typeof value === "string" && value.trim().length > 0) {
+          const parsed = Number.parseFloat(value);
+          return Number.isFinite(parsed) ? parsed : fallback;
+        }
+        return fallback;
+      };
+
+      const normalizeContract = (raw: unknown): string | null => {
+        if (typeof raw !== "string" || raw.trim().length === 0) {
+          return null;
+        }
+        const upper = raw.trim().toUpperCase();
+        if (upper.includes("_")) {
+          return upper;
+        }
+        if (upper.endsWith("USDT")) {
+          return `${upper.slice(0, -4)}_USDT`;
+        }
+        return `${upper}_USDT`;
+      };
+
+      const positions: Array<{
+        symbol: string;
+        quantity: number;
+        entryPrice: number;
+        currentPrice: number;
+        liquidationPrice: number;
+        unrealizedPnl: number;
+        leverage: number;
+        side: "long" | "short";
+        openValue: number;
+        profitTarget: number | null;
+        stopLoss: number | null;
+        openedAt: string;
+      }> = [];
+
+      for (const position of gatePositions ?? []) {
+        const rawSize = toNumber(
+          (position as any).positionAmt ?? (position as any).size,
+        );
+        if (!Number.isFinite(rawSize) || Math.abs(rawSize) <= 0) {
+          continue;
+        }
+
+        const contractName =
+          normalizeContract((position as any).contract) ??
+          normalizeContract((position as any).symbol);
+        if (!contractName) {
+          logger.warn(
+            `跳过无法识别合约的持仓: ${JSON.stringify(position).slice(0, 200)}`,
+          );
+          continue;
+        }
+
+        const symbol = contractName.replace("_USDT", "");
+        const dbPos = dbPositionsMap.get(symbol);
+        const entryPrice = toNumber((position as any).entryPrice);
+        const currentPrice = toNumber((position as any).markPrice);
+        const leverage = Math.max(1, toNumber((position as any).leverage, 1));
+        const quantity = Math.abs(rawSize);
+        const unrealized =
+          toNumber((position as any).unrealisedPnl) ??
+          toNumber((position as any).unRealizedProfit) ??
+          0;
+
+        const reportedMargin = toNumber((position as any).margin);
+        const reportedNotional = toNumber((position as any).notional);
+
+        let openValue = reportedMargin > 0 ? reportedMargin : 0;
+        if (!(openValue > 0)) {
+          const derivedNotional =
+            reportedNotional > 0
+              ? reportedNotional
+              : entryPrice > 0 && quantity > 0
+              ? quantity * entryPrice
+              : 0;
+          if (derivedNotional > 0) {
+            openValue = leverage > 0 ? derivedNotional / leverage : derivedNotional;
+          }
+        }
+        if (!Number.isFinite(openValue)) {
+          openValue = 0;
+        }
+
+        positions.push({
+          symbol,
+          quantity,
+          entryPrice,
+          currentPrice,
+          liquidationPrice: toNumber((position as any).liqPrice),
+          unrealizedPnl: unrealized,
+          leverage,
+          side: rawSize > 0 ? "long" : "short",
+          openValue,
+          profitTarget: dbPos?.profit_target ? Number(dbPos.profit_target) : null,
+          stopLoss: dbPos?.stop_loss ? Number(dbPos.stop_loss) : null,
+          openedAt:
+            (position as any).create_time ||
+            (position as any).update_time ||
+            new Date().toISOString(),
         });
+      }
       
       return c.json({ positions });
     } catch (error: any) {

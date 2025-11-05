@@ -6,7 +6,7 @@
 
 [![VoltAgent](https://img.shields.io/badge/Framework-VoltAgent-purple.svg)](https://voltagent.dev)
 [![OpenAI Compatible](https://img.shields.io/badge/AI-OpenAI_Compatible-orange.svg)](https://openrouter.ai)
-[![Gate.io](https://img.shields.io/badge/Exchange-Gate.io-00D4AA.svg)](https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103)
+[![Gate.io](https://img.shields.io/badge/Exchange-Gate.io-00D4AA.svg)](https://www.gatesite.org/signup/VVVEA10LVQ?ref_type=103)
 [![Binance](https://img.shields.io/badge/Exchange-Binance-FAA81A.svg)](https://www.binance.com/zh-CN/futures)
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Node.js](https://img.shields.io/badge/Runtime-Node.js%2020+-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
@@ -217,7 +217,7 @@ AI_MAX_OUTPUT_TOKENS=4096                    # AI 输出最大 Token（避免回
 - OpenAI: https://platform.openai.com/api-keys
 - DeepSeek: https://platform.deepseek.com/api_keys
 - Gate.io 测试网: https://www.gate.io/testnet
-- Gate.io 正式网: https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103
+- Gate.io 正式网: https://www.gatesite.org/signup/VVVEA10LVQ?ref_type=103
 - Binance 测试网: https://testnet.binancefuture.com
 - Binance 正式网: https://www.binance.com/zh-CN/futures/api-center
 
@@ -299,6 +299,7 @@ open-nof1.ai/
 | 变量 | 说明 | 默认值 | 是否必需 |
 |------|------|--------|---------|
 | `PORT` | HTTP 服务器端口 | 3100 | 否 |
+| `TRADING_STRATEGY` | 交易策略(`ultra-short`/`swing-trend`/`conservative`/`balanced`/`aggressive`) | balanced | 否 |
 | `TRADING_INTERVAL_MINUTES` | 交易循环间隔(分钟) | 5 | 否 |
 | `MAX_LEVERAGE` | 最大杠杆倍数 | 10 | 否 |
 | `MAX_POSITIONS` | 最大持仓数量 | 5 | 否 |
@@ -323,6 +324,28 @@ open-nof1.ai/
 | `ACCOUNT_DRAWDOWN_WARNING_PERCENT` | 账户回撤警告阈值：发出风险警告提醒(%) | 20 | 否 |
 | `ACCOUNT_DRAWDOWN_NO_NEW_POSITION_PERCENT` | 禁止开仓阈值：停止开新仓位，只允许平仓(%) | 30 | 否 |
 | `ACCOUNT_DRAWDOWN_FORCE_CLOSE_PERCENT` | 强制平仓阈值：自动平掉所有仓位，保护剩余资金(%) | 50 | 否 |
+
+### 交易策略说明
+
+系统支持5种交易策略，适应不同的市场环境和风险偏好：
+
+| 策略代码 | 策略名称 | 执行周期 | 持仓时长 | 风险等级 | 特点 |
+|---------|---------|---------|---------|---------|------|
+| `ultra-short` | 超短线 | 5分钟 | 30分钟-2小时 | 中高 | 快进快出，2%周期锁利，30分钟盈利平仓 |
+| `swing-trend` | **波段趋势** ⭐ | **20分钟** | **数小时-3天** | **中低** | **中长线波段，捕捉趋势，稳健成长** |
+| `conservative` | 稳健 | 5-15分钟 | 数小时-24小时 | 低 | 低风险低杠杆，保护本金优先 |
+| `balanced` | 平衡 | 5-15分钟 | 数小时-24小时 | 中 | 风险收益平衡（默认策略） |
+| `aggressive` | 激进 | 5-15分钟 | 数小时-24小时 | 高 | 追求高收益，承担高风险 |
+
+**推荐配置 - 波段趋势策略**（适合中长线稳健成长）：
+```bash
+TRADING_STRATEGY=swing-trend
+TRADING_INTERVAL_MINUTES=20
+MAX_LEVERAGE=10
+MAX_POSITIONS=3
+```
+
+详细策略说明请参考：[交易策略配置指南](./docs/TRADING_STRATEGIES_ZH.md)
 
 ### AI 模型配置
 
@@ -773,7 +796,7 @@ npm run trading:start
 
 如果您还没有 Gate.io 账户，推荐通过以下邀请方式注册：
 
-- **邀请链接**: [https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103](https://www.gatesite.work/signup/VVVEA10LVQ?ref_type=103)
+- **邀请链接**: [https://www.gatesite.org/signup/VVVEA10LVQ?ref_type=103](https://www.gatesite.org/signup/VVVEA10LVQ?ref_type=103)
 - **邀请码**: `VVVEA10LVQ`
 
 > 使用邀请码注册，您将获得交易返佣优惠，同时帮助维护这个开源项目的长期运营。这对您和项目都有益，且完全免费无任何额外费用。

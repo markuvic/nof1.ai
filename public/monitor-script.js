@@ -168,7 +168,10 @@ class TradingMonitor {
             // 更新持仓表格
             if (positionsBody) {
                 positionsBody.innerHTML = data.positions.map(pos => {
-                    const profitPercent = ((pos.unrealizedPnl / pos.openValue) * 100).toFixed(2);
+                    const profitPercentValue = this.calculateProfitPercent(pos);
+                    const profitPercentText = profitPercentValue === null
+                        ? '—'
+                        : `${profitPercentValue >= 0 ? '+' : ''}${profitPercentValue.toFixed(2)}%`;
                     const sideText = pos.side === 'long' ? '做多' : '做空';
                     const sideClass = pos.side === 'long' ? 'positive' : 'negative';
                     const leverage = pos.leverage || '-';
@@ -184,7 +187,7 @@ class TradingMonitor {
                                 ${pos.unrealizedPnl >= 0 ? '+' : ''}$${pos.unrealizedPnl.toFixed(2)}
                             </td>
                             <td class="${pos.unrealizedPnl >= 0 ? 'positive' : 'negative'}">
-                                ${pos.unrealizedPnl >= 0 ? '+' : ''}${profitPercent}%
+                                ${profitPercentText}
                             </td>
                         </tr>
                     `;
@@ -194,7 +197,10 @@ class TradingMonitor {
             // 更新持仓小卡片
             if (positionsCardsContainer) {
                 positionsCardsContainer.innerHTML = data.positions.map(pos => {
-                    const profitPercent = ((pos.unrealizedPnl / pos.openValue) * 100).toFixed(2);
+                    const profitPercentValue = this.calculateProfitPercent(pos);
+                    const profitPercentText = profitPercentValue === null
+                        ? '—'
+                        : `${profitPercentValue >= 0 ? '+' : ''}${profitPercentValue.toFixed(2)}%`;
                     const sideClass = pos.side;
                     const sideText = pos.side === 'long' ? '多' : '空';
                     const pnlClass = pos.unrealizedPnl >= 0 ? 'positive' : 'negative';
@@ -204,7 +210,7 @@ class TradingMonitor {
                         <div class="position-card ${sideClass} ${pnlClass}">
                             <span class="position-card-symbol">${pos.symbol} ${leverage}x</span>
                             <span class="position-card-pnl ${pnlClass}">
-                                ${sideText} ${pos.unrealizedPnl >= 0 ? '+' : ''}$${pos.unrealizedPnl.toFixed(2)} (${pos.unrealizedPnl >= 0 ? '+' : ''}${profitPercent}%)
+                                ${sideText} ${pos.unrealizedPnl >= 0 ? '+' : ''}$${pos.unrealizedPnl.toFixed(2)} (${profitPercentText})
                             </span>
                         </div>
                     `;
@@ -214,6 +220,19 @@ class TradingMonitor {
         } catch (error) {
             console.error('加载持仓数据失败:', error);
         }
+    }
+
+    calculateProfitPercent(position) {
+        const unrealized = Number(position.unrealizedPnl);
+        const openValue = Number(position.openValue);
+        if (!Number.isFinite(unrealized)) {
+            return null;
+        }
+        if (!Number.isFinite(openValue) || Math.abs(openValue) < 1e-6) {
+            return null;
+        }
+        const percent = (unrealized / openValue) * 100;
+        return Number.isFinite(percent) ? percent : null;
     }
 
     // 加载交易记录 - 使用和 index.html 相同的布局

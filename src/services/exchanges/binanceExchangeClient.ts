@@ -565,27 +565,65 @@ export class BinanceExchangeClient implements ExchangeClient {
       path: "/fapi/v2/positionRisk",
       signed: true,
     });
-    return Promise.all(
-      data.map(async (position: any) => {
+    const activePositions = data.filter((position: any) => {
+      const amount = Number.parseFloat(position.positionAmt ?? "0");
+      return Number.isFinite(amount) && Math.abs(amount) > 0;
+    });
+
+    const normalized = await Promise.all(
+      activePositions.map(async (position: any) => {
         const contract = toContract(position.symbol);
-        const meta = await this.getSymbolMeta(contract);
-        return {
-          contract,
-          size: Math.round(
-            Number.parseFloat(position.positionAmt || "0") / meta.stepSize,
-          ).toString(),
-          entryPrice: position.entryPrice,
-          markPrice: position.markPrice,
-          leverage: position.leverage,
-          unrealisedPnl: position.unRealizedProfit,
-          liqPrice: position.liquidationPrice,
-          margin: position.positionInitialMargin ?? position.isolatedMargin ?? "0",
-          tif: "gtc",
-          update_time: position.updateTime
-            ? new Date(position.updateTime).toISOString()
-            : new Date().toISOString(),
-        };
+
+        try {
+          const meta = await this.getSymbolMeta(contract);
+          const rawPositionAmt = Number.parseFloat(position.positionAmt || "0");
+          const entryPriceValue = Number.parseFloat(position.entryPrice || "0");
+          const leverageValue = Number.parseFloat(position.leverage || "0");
+          const notionalValue = Number.isFinite(entryPriceValue)
+            ? Math.abs(rawPositionAmt * entryPriceValue)
+            : 0;
+          const reportedMargin = Number.parseFloat(
+            (position.positionInitialMargin ??
+              position.isolatedMargin ??
+              "0") as string,
+          );
+          const computedMargin =
+            Number.isFinite(leverageValue) && leverageValue > 0
+              ? notionalValue / leverageValue
+              : notionalValue;
+          const effectiveMargin =
+            Number.isFinite(reportedMargin) && reportedMargin > 0
+              ? reportedMargin
+              : computedMargin;
+          return {
+            contract,
+            size: Math.round(
+              Number.parseFloat(position.positionAmt || "0") / meta.stepSize,
+            ).toString(),
+            entryPrice: position.entryPrice,
+            markPrice: position.markPrice,
+            leverage: position.leverage,
+            unrealisedPnl: position.unRealizedProfit,
+            liqPrice: position.liquidationPrice,
+            margin: Number.isFinite(effectiveMargin) ? effectiveMargin.toString() : "0",
+            notional: Number.isFinite(notionalValue) ? notionalValue.toString() : "0",
+            positionAmt: rawPositionAmt.toString(),
+            tif: "gtc",
+            update_time: position.updateTime
+              ? new Date(position.updateTime).toISOString()
+              : new Date().toISOString(),
+          };
+        } catch (error) {
+          logger.warn(
+            `跳过无法解析的 Binance 仓位 ${contract}: ${(error as Error).message}`,
+          );
+          return null;
+        }
       }),
+    );
+
+    return normalized.filter(
+      (position): position is NonNullable<typeof position> => position !== null,
     );
   }
 

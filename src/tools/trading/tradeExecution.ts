@@ -171,9 +171,9 @@ export const openPositionTool = createTool({
       }
       
       // 6. 检查单笔仓位（建议不超过账户净值的30%）
-      const maxSinglePosition = totalBalance * 0.30; // 30%
+      const maxSinglePosition = totalBalance * 0.50; // 30%
       if (amountUsdt > maxSinglePosition) {
-        logger.warn(`开仓金额 ${amountUsdt.toFixed(2)} USDT 超过建议仓位 ${maxSinglePosition.toFixed(2)} USDT（账户净值的30%）`);
+        logger.warn(`开仓金额 ${amountUsdt.toFixed(2)} USDT 超过建议仓位 ${maxSinglePosition.toFixed(2)} USDT（账户净值的50%）`);
       }
       
       // ====== 流动性保护检查 ======
@@ -714,13 +714,22 @@ export const closePositionTool = createTool({
       }
 
       // 从 Gate.io 获取实时数据
-      const gateSize = Number.parseInt(gatePosition.size || "0");
+      const gateSize = Number.parseFloat(
+        (gatePosition.size ?? gatePosition.positionAmt ?? "0") as string,
+      );
       const side = gateSize > 0 ? "long" : "short";
       const quantity = Math.abs(gateSize);
       let entryPrice = Number.parseFloat(gatePosition.entryPrice || "0");
       let currentPrice = Number.parseFloat(gatePosition.markPrice || "0");
       const leverage = Number.parseInt(gatePosition.leverage || "1");
       const totalUnrealizedPnl = Number.parseFloat(gatePosition.unrealisedPnl || "0");
+
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return {
+          success: false,
+          message: `未找到可平仓的 ${symbol} 持仓数量`,
+        };
+      }
       
       //  如果价格为0，获取实时行情作为后备
       if (currentPrice === 0 || entryPrice === 0) {
@@ -736,7 +745,55 @@ export const closePositionTool = createTool({
       }
       
       // 计算平仓数量
-      const closeSize = Math.floor((quantity * percentage) / 100);
+      const contractInfo = await client.getContractInfo(contract).catch(() => null);
+      const parseNumeric = (value: unknown): number => {
+        if (typeof value === "number") {
+          return value;
+        }
+        if (typeof value === "string") {
+          const num = Number.parseFloat(value);
+          return Number.isFinite(num) ? num : Number.NaN;
+        }
+        return Number.NaN;
+      };
+      const minContractsCandidate = [
+        parseNumeric(contractInfo?.orderSizeMin),
+        parseNumeric((contractInfo as any)?.order_size_min),
+        parseNumeric((contractInfo as any)?.order_size?.min),
+      ].find((num) => Number.isFinite(num) && num > 0);
+      const stepCandidate = [
+        parseNumeric(contractInfo?.orderSizeStep),
+        parseNumeric((contractInfo as any)?.order_size_step),
+        parseNumeric((contractInfo as any)?.order_size?.step),
+      ].find((num) => Number.isFinite(num) && num > 0);
+
+      const minContracts = Number.isFinite(minContractsCandidate)
+        ? Math.max(1, Math.round(minContractsCandidate!))
+        : 1;
+      const contractStep = Number.isFinite(stepCandidate)
+        ? Math.max(1, Math.round(stepCandidate!))
+        : 1;
+
+      let closeSize = Math.round((quantity * percentage) / 100 / contractStep) * contractStep;
+      if (percentage === 100) {
+        closeSize = quantity;
+      }
+
+      if (closeSize < minContracts) {
+        return {
+          success: false,
+          message: `当前 ${symbol} 持仓仅 ${quantity} 张，无法按 ${percentage}% 平仓（最小交易单位 ${minContracts} 张）。请调整百分比或选择全仓平仓。`,
+        };
+      }
+
+      if (percentage < 100 && closeSize >= quantity) {
+        return {
+          success: false,
+          message: `当前 ${symbol} 持仓为 ${quantity} 张，按 ${percentage}% 平仓会导致直接清仓。请调整比例或改为手动处理。`,
+        };
+      }
+
+      closeSize = Math.min(closeSize, quantity);
       const size = side === "long" ? -closeSize : closeSize;
       
       //  获取合约乘数用于计算盈亏和手续费
