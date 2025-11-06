@@ -289,15 +289,49 @@ export const getFundingRateTool = createTool({
     const contract = `${symbol}_USDT`;
     
     const fundingRate = await client.getFundingRate(contract);
+    const rateValue = extractFundingRateValue(fundingRate);
+    const fundingTimestamp = extractFundingTime(fundingRate);
     
     return {
       symbol,
-      fundingRate: Number.parseFloat(fundingRate.r || "0"),
-      fundingTime: fundingRate.t,
+      fundingRate: rateValue,
+      fundingTime: fundingTimestamp,
       timestamp: new Date().toISOString(),
     };
   },
 });
+
+function extractFundingRateValue(raw: any): number {
+  const candidates = [
+    raw?.fundingRate,
+    raw?.rate,
+    raw?.r,
+    raw?.value,
+  ];
+  const rateStr = candidates.find(
+    (candidate) => candidate !== undefined && candidate !== null && candidate !== "",
+  );
+  const parsed = Number.parseFloat(
+    typeof rateStr === "number" ? rateStr.toString() : (rateStr ?? "0"),
+  );
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function extractFundingTime(raw: any): string | null {
+  const timeCandidate =
+    raw?.fundingTime ??
+    raw?.time ??
+    raw?.t ??
+    raw?.timestamp ??
+    null;
+  if (typeof timeCandidate === "number") {
+    return new Date(timeCandidate).toISOString();
+  }
+  if (typeof timeCandidate === "string" && timeCandidate.length > 0) {
+    return timeCandidate;
+  }
+  return null;
+}
 
 /**
  * 获取订单簿深度工具

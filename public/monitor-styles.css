@@ -213,9 +213,17 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 1rem;
     margin-bottom: 1rem;
     padding-bottom: 0.5rem;
     border-bottom: 1px solid var(--border-color);
+}
+
+.decision-header-left {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
 }
 
 .decision-title {
@@ -239,6 +247,23 @@ body {
     color: var(--accent-green);
     font-size: 0.9rem;
     font-weight: bold;
+}
+
+.decision-toggle {
+    background-color: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.decision-toggle:hover {
+    color: var(--accent-green);
+    border-color: var(--accent-green);
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.2);
 }
 
 /* Chart Container */
@@ -301,6 +326,13 @@ body {
     max-width: 100%;
     word-wrap: break-word;
     word-break: break-word;
+}
+
+.decision-container.collapsed {
+    max-height: 0;
+    padding: 0;
+    border-width: 0;
+    overflow: hidden;
 }
 
 .decision-content {
@@ -462,6 +494,118 @@ body {
 
 .decision-content .error {
     color: var(--accent-red);
+}
+
+.decision-history {
+    margin-top: 1rem;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    padding: 1rem;
+}
+
+.decision-history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.decision-history-header h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.decision-history-tip {
+    margin: 0.25rem 0 0;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+}
+
+.decision-history-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.decision-history-count {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.decision-history-toggle {
+    background-color: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    padding: 0.3rem 0.7rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.decision-history-toggle:hover {
+    color: var(--accent-green);
+    border-color: var(--accent-green);
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.2);
+}
+
+.decision-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.decision-history.collapsed .decision-history-list {
+    display: none;
+}
+
+.decision-history-item {
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background-color: var(--bg-primary);
+    overflow: hidden;
+}
+
+.decision-history-item summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.75rem 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    background-color: var(--bg-tertiary);
+}
+
+.decision-history-item summary::marker,
+.decision-history-item summary::-webkit-details-marker {
+    display: none;
+}
+
+.decision-history-item summary span {
+    white-space: nowrap;
+}
+
+.decision-history-item summary .decision-history-iteration {
+    color: var(--accent-green);
+    font-weight: bold;
+}
+
+.decision-history-item .decision-history-body {
+    padding: 0.75rem 1rem;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+
+.decision-history-item .decision-history-body .markdown-content {
+    font-size: 0.8rem;
 }
 
 /* Account Section */
@@ -1612,4 +1756,3 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--accent-green);
 }
-

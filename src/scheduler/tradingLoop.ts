@@ -48,6 +48,25 @@ const SYMBOLS = [...RISK_PARAMS.TRADING_SYMBOLS] as string[];
 let tradingStartTime = new Date();
 let iterationCount = 0;
 
+function extractFundingRate(raw: any): number {
+  if (!raw) {
+    return 0;
+  }
+  const candidates = [
+    raw.fundingRate,
+    raw.rate,
+    raw.r,
+    raw.value,
+  ];
+  const rateStr = candidates.find(
+    (candidate) => candidate !== undefined && candidate !== null && candidate !== "",
+  );
+  const parsed = Number.parseFloat(
+    typeof rateStr === "number" ? rateStr.toString() : (rateStr ?? "0"),
+  );
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 // 账户风险配置
 let accountRiskConfig = getAccountRiskConfig();
 
@@ -175,10 +194,7 @@ async function collectMarketData() {
       let fundingRate = 0;
       try {
         const fr = await exchangeClient.getFundingRate(contract);
-        fundingRate = Number.parseFloat(fr.r || "0");
-        if (!Number.isFinite(fundingRate)) {
-          fundingRate = 0;
-        }
+        fundingRate = extractFundingRate(fr);
       } catch (error) {
         logger.warn(`获取 ${symbol} 资金费率失败:`, error as any);
       }

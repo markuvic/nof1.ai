@@ -1,4 +1,13 @@
 import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+  promises as fsPromises,
+} from "node:fs";
+import { dirname, resolve as resolvePath } from "node:path";
 import { createPinoLogger } from "@voltagent/logger";
 import { createBinanceExchangeClient } from "./binanceExchangeClient";
 import type { ExchangeClient, ExchangeOrderParams } from "./types";
@@ -50,10 +59,75 @@ interface DryRunTrade {
   timestamp: string;
 }
 
+interface DryRunSnapshot {
+  version: number;
+  timestamp: string;
+  walletBalance: number;
+  positions: DryRunPosition[];
+  orders: DryRunOrder[];
+  trades: DryRunTrade[];
+  contractLeverage: Array<{ contract: string; leverage: number }>;
+  config: DryRunConfig;
+}
+
+const SNAPSHOT_VERSION = 1;
+const DEFAULT_SNAPSHOT_FILE = ".voltagent/dry-run-state.json";
+let exitHandlerRegistered = false;
+
 const logger = createPinoLogger({
   name: "binance-dry-run",
   level: (process.env.LOG_LEVEL as any) || "info",
 });
+
+function resolveSnapshotPath(): string {
+  const custom = process.env.DRY_RUN_STATE_PATH?.trim();
+  if (custom && custom.length > 0) {
+    return resolvePath(process.cwd(), custom);
+  }
+  return resolvePath(process.cwd(), DEFAULT_SNAPSHOT_FILE);
+}
+
+function loadSnapshotFromDisk(path: string): DryRunSnapshot | null {
+  try {
+    const raw = readFileSync(path, "utf8");
+    const parsed = JSON.parse(raw) as DryRunSnapshot;
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    if (parsed.version !== SNAPSHOT_VERSION) {
+      logger.warn(
+        `检测到不兼容的 dry-run 快照版本: ${parsed.version}，当前版本 ${SNAPSHOT_VERSION}，将忽略旧数据。`,
+      );
+      return null;
+    }
+    return parsed;
+  } catch (error: any) {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+    logger.error("读取 dry-run 快照失败:", error);
+    return null;
+  }
+}
+
+function registerDryRunExitHandlers(flush: () => void) {
+  if (exitHandlerRegistered) {
+    return;
+  }
+  exitHandlerRegistered = true;
+  let flushed = false;
+  const safeFlush = () => {
+    if (flushed) return;
+    flushed = true;
+    try {
+      flush();
+    } catch (error) {
+      logger.error("退出前写入 dry-run 快照失败:", error as any);
+    }
+  };
+  process.once("beforeExit", safeFlush);
+  process.once("exit", safeFlush);
+}
 
 function loadConfig(): DryRunConfig {
   const initialBalance = Number.parseFloat(
@@ -83,11 +157,165 @@ export function createBinanceDryRunExchangeClient(): ExchangeClient {
   const config = loadConfig();
   const marketClient = createBinanceExchangeClient();
 
+  const snapshotPath = resolveSnapshotPath();
+  const snapshotDir = dirname(snapshotPath);
+  const shouldResetSnapshot =
+    process.env.DRY_RUN_RESET === "true" || process.env.DRY_RUN_CLEAR === "true";
+
+  if (shouldResetSnapshot && existsSync(snapshotPath)) {
+    try {
+      unlinkSync(snapshotPath);
+      logger.info("检测到 DRY_RUN_RESET，已清空 dry-run 状态快照。");
+    } catch (error) {
+      logger.warn("尝试清空 dry-run 快照失败:", error as any);
+    }
+  }
+
   let walletBalance = config.initialBalance;
   const positions = new Map<string, DryRunPosition>();
   const contractLeverage = new Map<string, number>();
   const orders = new Map<string, DryRunOrder>();
   const trades: DryRunTrade[] = [];
+
+  let persistTimer: NodeJS.Timeout | null = null;
+  let persistInFlight: Promise<void> | null = null;
+
+  function buildSnapshot(): DryRunSnapshot {
+    return {
+      version: SNAPSHOT_VERSION,
+      timestamp: new Date().toISOString(),
+      walletBalance,
+      positions: Array.from(positions.values()),
+      orders: Array.from(orders.values()),
+      trades: [...trades],
+      contractLeverage: Array.from(contractLeverage.entries()).map(
+        ([contract, leverage]) => ({ contract, leverage }),
+      ),
+      config,
+    };
+  }
+
+  async function persistSnapshot() {
+    try {
+      const snapshot = buildSnapshot();
+      await fsPromises.mkdir(snapshotDir, { recursive: true });
+      const tempPath = `${snapshotPath}.tmp`;
+      await fsPromises.writeFile(
+        tempPath,
+        JSON.stringify(snapshot, null, 2),
+        "utf8",
+      );
+      try {
+        await fsPromises.rename(tempPath, snapshotPath);
+      } catch (renameError: any) {
+        if (
+          renameError?.code === "EEXIST" ||
+          renameError?.code === "EPERM" ||
+          renameError?.code === "EXDEV"
+        ) {
+          await fsPromises.rm(snapshotPath, { force: true }).catch(() => {});
+          await fsPromises.rename(tempPath, snapshotPath);
+        } else {
+          throw renameError;
+        }
+      }
+    } catch (error) {
+      logger.error("保存 dry-run 快照失败:", error as any);
+    }
+  }
+
+  function schedulePersist() {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+    }
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      const run = (async () => {
+        if (persistInFlight) {
+          try {
+            await persistInFlight;
+          } catch {
+            // 已在先前持久化阶段记录错误
+          }
+        }
+        await persistSnapshot();
+      })();
+      persistInFlight = run;
+      run.finally(() => {
+        if (persistInFlight === run) {
+          persistInFlight = null;
+        }
+      }).catch(() => {
+        // 错误已在 persistSnapshot 内部处理
+      });
+    }, 200);
+  }
+
+  function flushSnapshotSync() {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    if (persistInFlight) {
+      // best-effort: allow async write to finish before fallback
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      persistInFlight.catch(() => {
+        // ignore errors here, will attempt sync write below
+      });
+    }
+    try {
+      const snapshot = buildSnapshot();
+      mkdirSync(snapshotDir, { recursive: true });
+      writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2), "utf8");
+    } catch (error) {
+      logger.error("同步写入 dry-run 快照失败:", error as any);
+    }
+  }
+
+  registerDryRunExitHandlers(flushSnapshotSync);
+
+  const snapshot = shouldResetSnapshot
+    ? null
+    : loadSnapshotFromDisk(snapshotPath);
+
+  if (snapshot) {
+    walletBalance = Number.isFinite(snapshot.walletBalance)
+      ? snapshot.walletBalance
+      : config.initialBalance;
+    positions.clear();
+    snapshot.positions?.forEach((position) => {
+      if (position?.contract) {
+        positions.set(position.contract, { ...position });
+      }
+    });
+    contractLeverage.clear();
+    snapshot.contractLeverage?.forEach(({ contract, leverage }) => {
+      if (contract) {
+        contractLeverage.set(contract, Math.max(1, Math.floor(leverage)));
+      }
+    });
+    orders.clear();
+    snapshot.orders?.forEach((order) => {
+      if (order?.id) {
+        orders.set(order.id, { ...order });
+      }
+    });
+    trades.length = 0;
+    if (Array.isArray(snapshot.trades)) {
+      trades.push(
+        ...snapshot.trades.map((trade) => ({
+          ...trade,
+        })),
+      );
+    }
+    logger.info(
+      `Dry-Run 状态已从快照恢复：余额 ${walletBalance.toFixed(
+        2,
+      )} USDT，持仓 ${positions.size} 个，历史成交 ${trades.length} 条。`,
+    );
+  } else {
+    schedulePersist();
+  }
 
   logger.info(
     `Binance Dry-Run 模式已启用：初始资金 ${walletBalance.toFixed(2)} USDT，手续费 ${(
@@ -145,6 +373,7 @@ export function createBinanceDryRunExchangeClient(): ExchangeClient {
       updateTime: new Date().toISOString(),
     };
     orders.set(id, order);
+    schedulePersist();
     return order;
   }
 
@@ -190,6 +419,7 @@ export function createBinanceDryRunExchangeClient(): ExchangeClient {
           peakPnl: 0,
         };
         positions.set(contract, position);
+        schedulePersist();
         return { position, realisedPnl: 0 };
       }
 
@@ -222,6 +452,7 @@ export function createBinanceDryRunExchangeClient(): ExchangeClient {
       existing.updatedAt = timeNow;
       existing.realisedPnl -= fee;
       positions.set(contract, existing);
+      schedulePersist();
       return { position: existing, realisedPnl: -fee };
     }
 
@@ -239,6 +470,7 @@ export function createBinanceDryRunExchangeClient(): ExchangeClient {
 
     if (remainingSize === 0) {
       positions.delete(contract);
+      schedulePersist();
       return { realisedPnl, position: undefined };
     }
 
@@ -253,6 +485,7 @@ export function createBinanceDryRunExchangeClient(): ExchangeClient {
       existing.updatedAt = timeNow;
       existing.realisedPnl += realisedPnl;
       positions.set(contract, existing);
+      schedulePersist();
       return { position: existing, realisedPnl };
     }
 
@@ -284,6 +517,7 @@ export function createBinanceDryRunExchangeClient(): ExchangeClient {
       peakPnl: 0,
     };
     positions.set(contract, newPosition);
+    schedulePersist();
     return { position: newPosition, realisedPnl };
   }
 
@@ -386,6 +620,7 @@ export function createBinanceDryRunExchangeClient(): ExchangeClient {
         fee,
         timestamp: order.updateTime,
       });
+      schedulePersist();
 
       return {
         id: order.id,
@@ -432,6 +667,7 @@ export function createBinanceDryRunExchangeClient(): ExchangeClient {
       record.status = "cancelled";
       record.updateTime = new Date().toISOString();
       orders.set(orderId, record);
+      schedulePersist();
       return record;
     },
     async getOpenOrders(contract?: string) {
@@ -445,6 +681,7 @@ export function createBinanceDryRunExchangeClient(): ExchangeClient {
     },
     async setLeverage(contract: string, leverage: number) {
       contractLeverage.set(contract, Math.max(1, Math.floor(leverage)));
+      schedulePersist();
       return { symbol: contract, leverage };
     },
     async getFundingRate(contract: string) {

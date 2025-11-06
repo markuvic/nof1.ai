@@ -164,15 +164,33 @@
     <!-- AI Decision Section -->
     <section class="chart-section">
       <div class="chart-header">
-        <h3 class="decision-title">最新 AI 决策</h3>
-        <div class="decision-meta" id="decision-meta">
-          <span class="decision-time">加载中...</span>
-          <span class="decision-iteration">#-</span>
+        <div class="decision-header-left">
+          <h3 class="decision-title">最新 AI 决策</h3>
+          <div class="decision-meta" id="decision-meta">
+            <span class="decision-time">加载中...</span>
+            <span class="decision-iteration">#-</span>
+          </div>
         </div>
+        <button class="decision-toggle" id="decision-toggle" type="button">展开决策</button>
       </div>
-      <div class="decision-container">
+      <div class="decision-container collapsed" id="decision-container">
         <div class="decision-content" id="decision-content">
           <p class="loading">加载 AI 决策中...</p>
+        </div>
+      </div>
+      <div class="decision-history collapsed" id="decision-history">
+        <div class="decision-history-header">
+          <div>
+            <h4>决策历史</h4>
+            <p class="decision-history-tip">默认展示最近 20 条，可逐条展开查看详情</p>
+          </div>
+          <div class="decision-history-controls">
+            <span class="decision-history-count" id="decision-history-count">(0)</span>
+            <button class="decision-history-toggle" id="decision-history-toggle" type="button">展开历史</button>
+          </div>
+        </div>
+        <div class="decision-history-list" id="decision-history-list">
+          <p class="loading">加载历史决策中...</p>
         </div>
       </div>
     </section>

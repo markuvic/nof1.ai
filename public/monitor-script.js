@@ -23,6 +23,9 @@ class TradingMonitor {
         this.accountData = null;
         this.equityChart = null;
         this.chartTimeframe = '24'; // 固定24小时
+        this.decisionExpanded = false;
+        this.decisionHistoryExpanded = false;
+        this.decisionLogs = [];
         this.init();
     }
 
@@ -35,6 +38,7 @@ class TradingMonitor {
         this.initChat();
         this.duplicateTicker();
         this.loadGitHubStars(); // 加载 GitHub 星标数
+        this.initDecisionSection();
     }
 
     // 加载初始数据
@@ -309,10 +313,54 @@ class TradingMonitor {
         }
     }
 
-    // 加载 AI 决策日志 - 显示最新一条完整内容
+    initDecisionSection() {
+        const toggleButton = document.getElementById('decision-toggle');
+        const historyToggle = document.getElementById('decision-history-toggle');
+        if (!toggleButton) return;
+        toggleButton.addEventListener('click', () => {
+            this.decisionExpanded = !this.decisionExpanded;
+            this.updateDecisionCollapseState();
+        });
+        this.updateDecisionCollapseState();
+        if (historyToggle) {
+            historyToggle.addEventListener('click', () => {
+                this.decisionHistoryExpanded = !this.decisionHistoryExpanded;
+                this.updateDecisionHistoryCollapseState();
+            });
+            this.updateDecisionHistoryCollapseState();
+        }
+    }
+
+    updateDecisionCollapseState() {
+        const container = document.getElementById('decision-container');
+        const toggleButton = document.getElementById('decision-toggle');
+        if (!container || !toggleButton) return;
+        if (this.decisionExpanded) {
+            container.classList.remove('collapsed');
+            toggleButton.textContent = '折叠决策';
+        } else {
+            container.classList.add('collapsed');
+            toggleButton.textContent = '展开决策';
+        }
+    }
+
+    updateDecisionHistoryCollapseState() {
+        const historyContainer = document.getElementById('decision-history');
+        const historyToggle = document.getElementById('decision-history-toggle');
+        if (!historyContainer || !historyToggle) return;
+        if (this.decisionHistoryExpanded) {
+            historyContainer.classList.remove('collapsed');
+            historyToggle.textContent = '折叠历史';
+        } else {
+            historyContainer.classList.add('collapsed');
+            historyToggle.textContent = '展开历史';
+        }
+    }
+
+    // 加载 AI 决策日志 - 最新一条 + 历史记录
     async loadLogsData() {
         try {
-            const response = await fetch('/api/logs?limit=1');
+            const response = await fetch('/api/logs?limit=20');
             const data = await response.json();
             
             if (data.error) {
@@ -320,11 +368,13 @@ class TradingMonitor {
                 return;
             }
 
+            const logs = Array.isArray(data.logs) ? data.logs : [];
+            this.decisionLogs = logs;
             const decisionContent = document.getElementById('decision-content');
             const decisionMeta = document.getElementById('decision-meta');
             
-            if (data.logs && data.logs.length > 0) {
-                const log = data.logs[0]; // 只取最新一条
+            if (logs.length > 0) {
+                const log = logs[0]; // 最新一条
                 
                 // 更新决策元信息
                 if (decisionMeta) {
@@ -359,6 +409,8 @@ class TradingMonitor {
                     decisionMeta.innerHTML = '<span class="decision-time">无数据</span>';
                 }
             }
+
+            this.renderDecisionHistory(logs);
             
         } catch (error) {
             console.error('加载日志失败:', error);
@@ -366,7 +418,51 @@ class TradingMonitor {
             if (decisionContent) {
                 decisionContent.innerHTML = `<p class="error">加载失败: ${error.message}</p>`;
             }
+            this.renderDecisionHistory([]);
         }
+    }
+
+    renderDecisionHistory(logs) {
+        const historyList = document.getElementById('decision-history-list');
+        const historyCount = document.getElementById('decision-history-count');
+        if (!historyList || !historyCount) {
+            return;
+        }
+
+        historyCount.textContent = `(${logs.length})`;
+
+        if (!logs.length) {
+            historyList.innerHTML = '<p class="no-data">暂无历史决策</p>';
+            return;
+        }
+
+        const formatTime = (value) => new Date(value).toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+
+        historyList.innerHTML = logs.map((log) => {
+            const timestamp = formatTime(log.timestamp);
+            const decision = log.decision || log.actionsTaken || '暂无决策内容';
+            const htmlContent = typeof marked !== 'undefined'
+                ? marked.parse(decision)
+                : decision;
+            return `
+                <details class="decision-history-item">
+                    <summary>
+                        <span>${timestamp}</span>
+                        <span class="decision-history-iteration">#${log.iteration}</span>
+                    </summary>
+                    <div class="decision-history-body">
+                        <div class="markdown-content">${htmlContent}</div>
+                    </div>
+                </details>
+            `;
+        }).join('');
     }
 
     // 加载顶部 Ticker 价格（从 API 获取）

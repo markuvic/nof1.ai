@@ -116,11 +116,17 @@ export function getStrategyParams(strategy: TradingStrategy): StrategyParams {
   const conservativeLevStrong = conservativeLevMax;
   
   // 平衡策略：60%-85% 的最大杠杆
-  const balancedLevMin = Math.max(2, Math.ceil(maxLeverage * 0.6));
-  const balancedLevMax = Math.max(3, Math.ceil(maxLeverage * 0.85));
-  const balancedLevNormal = balancedLevMin;
-  const balancedLevGood = Math.ceil((balancedLevMin + balancedLevMax) / 2);
-  const balancedLevStrong = balancedLevMax;
+  // const balancedLevMin = Math.max(2, Math.ceil(maxLeverage * 0.6));
+  // const balancedLevMax = Math.max(3, Math.ceil(maxLeverage * 0.85));
+  // const balancedLevNormal = balancedLevMin;
+  // const balancedLevGood = Math.ceil((balancedLevMin + balancedLevMax) / 2);
+  // const balancedLevStrong = balancedLevMax;
+  const balancedLevMin = maxLeverage;
+  const balancedLevMax = maxLeverage;
+  const balancedLevNormal = maxLeverage;
+  const balancedLevGood = maxLeverage;
+  const balancedLevStrong = maxLeverage;
+
   
   // 激进策略：85%-100% 的最大杠杆
   const aggressiveLevMin = Math.max(3, Math.ceil(maxLeverage * 0.85));
@@ -300,7 +306,7 @@ export function getStrategyParams(strategy: TradingStrategy): StrategyParams {
       },
       peakDrawdownProtection: 30, // 平衡策略：30%峰值回撤保护（标准平衡点）
       volatilityAdjustment: {
-        highVolatility: { leverageFactor: 0.7, positionFactor: 0.8 },   // 高波动：适度降低
+        highVolatility: { leverageFactor: 1.0, positionFactor: 1.0 },   // 高波动：适度降低
         normalVolatility: { leverageFactor: 1.0, positionFactor: 1.0 }, // 正常波动：不调整
         lowVolatility: { leverageFactor: 1.1, positionFactor: 1.0 },    // 低波动：略微提高杠杆
       },
@@ -753,14 +759,14 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
 - 动能（MACD/RSI）：0–20  
 - 量价配合：0–20  
 - 风险收益比：0–20  
-→ 80+ = A+，60–79 = B，<60 = C  
+→ 75+ = A+，60–74 = B，<60 = C  
 
 ---
 
 ## 🧭 决策闸门与优先级
 
-- **做多开仓条件**：bull_score ≥ 80 且 bull_score - bear_score ≥ 10 且 RR≥2.5  
-- **做空开仓条件**：bear_score ≥ 80 且 bear_score - bull_score ≥ 10 且 RR≥2.5  
+- **做多开仓条件**：bull_score ≥ 75 且 bull_score - bear_score ≥ 10 且 RR≥2.5  
+- **做空开仓条件**：bear_score ≥ 75 且 bear_score - bull_score ≥ 10 且 RR≥2.5  
 - **加仓条件**：方向一致、已有盈利>5%、信号增强≥10分  
 - **观望条件**：不满足任何闸门 → 不调用任何交易工具  
 - **顺势优先**：若1h/4h主趋势下行 → 优先空头；若上行 → 优先多头。  
