@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS positions (
     confidence REAL,
     risk_usd REAL,
     peak_pnl_percent REAL DEFAULT 0,
-    partial_close_percentage REAL DEFAULT 0
+    partial_close_percentage REAL DEFAULT 0,
+    system_tp_count INTEGER DEFAULT 0,
+    system_trailing_level INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS trading_signals (

@@ -93,8 +93,20 @@ export class GateExchangeClient implements ExchangeClient {
     contract: string,
     interval: string = "5m",
     limit: number = 100,
-    retries: number = 2
+    options?: number | { startTime?: number; endTime?: number; retries?: number },
   ) {
+    let startTime: number | undefined;
+    let endTime: number | undefined;
+    let retries = 2;
+    if (typeof options === "number") {
+      retries = options;
+    } else if (options) {
+      startTime = options.startTime;
+      endTime = options.endTime;
+      if (Number.isFinite(options.retries)) {
+        retries = options.retries!;
+      }
+    }
     let lastError: any;
     
     for (let i = 0; i <= retries; i++) {
@@ -105,6 +117,8 @@ export class GateExchangeClient implements ExchangeClient {
           {
             interval: interval as any,
             limit,
+            start: startTime,
+            end: endTime,
           }
         );
         return result.body;

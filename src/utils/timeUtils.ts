@@ -131,3 +131,23 @@ export function getChinaTimestamp(): number {
   return getChinaTime().getTime();
 }
 
+export function intervalToMs(interval: string): number {
+  const match = interval.match(/^(\d+)([a-zA-Z]+)$/);
+  if (!match) {
+    return 0;
+  }
+  const value = Number.parseInt(match[1], 10);
+  const unit = match[2].toLowerCase();
+  switch (unit) {
+    case "m":
+      return value * 60 * 1000;
+    case "h":
+      return value * 60 * 60 * 1000;
+    case "d":
+      return value * 24 * 60 * 60 * 1000;
+    case "w":
+      return value * 7 * 24 * 60 * 60 * 1000;
+    default:
+      return 0;
+  }
+}

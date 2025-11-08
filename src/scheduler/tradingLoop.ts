@@ -23,12 +23,16 @@ import cron from "node-cron";
 import { createPinoLogger } from "@voltagent/logger";
 import { createClient } from "@libsql/client";
 import { createTradingAgent, generateTradingPrompt, getAccountRiskConfig, getTradingStrategy, getStrategyParams } from "../agents/tradingAgent";
+import { createNakedKAgent, generateNakedKPrompt } from "../agents/nakedKAgent";
 import {
   createExchangeClient,
   getActiveExchangeId,
   isDryRunMode,
 } from "../services/exchanges";
+import { collectNakedKData } from "../services/marketData/nakedKCollector";
 import { getChinaTimeISO } from "../utils/timeUtils";
+import { getSystemProtectionConfig } from "../config/systemProtection";
+import { closePositionTool } from "../tools/trading/tradeExecution";
 import { RISK_PARAMS } from "../config/riskParams";
 import { getQuantoMultiplier } from "../utils/contractUtils";
 
@@ -43,11 +47,33 @@ const dbClient = createClient({
 
 // 支持的币种 - 从配置中读取
 const SYMBOLS = [...RISK_PARAMS.TRADING_SYMBOLS] as string[];
+const systemProtectionConfig = getSystemProtectionConfig();
 
 // 交易开始时间
 let tradingStartTime = new Date();
 let iterationCount = 0;
 
+let systemProtectionTimer: NodeJS.Timeout | null = null;
+let systemProtectionExecuting = false;
+
+async function ensurePositionsColumns() {
+  const columns = [
+    { name: "system_tp_count", sql: "ALTER TABLE positions ADD COLUMN system_tp_count INTEGER DEFAULT 0" },
+    { name: "system_trailing_level", sql: "ALTER TABLE positions ADD COLUMN system_trailing_level INTEGER DEFAULT 0" },
+  ];
+  try {
+    const info = await dbClient.execute("PRAGMA table_info(positions)");
+    const names = new Set((info.rows as any[]).map((r) => (r.name as string)));
+    for (const column of columns) {
+      if (!names.has(column.name)) {
+        await dbClient.execute(column.sql);
+        logger.info(`数据库迁移: 已为 positions 添加 ${column.name} 列`);
+      }
+    }
+  } catch (error) {
+    logger.warn("检查/迁移 positions 列失败:", error as any);
+  }
+}
 function extractFundingRate(raw: any): number {
   if (!raw) {
     return 0;
@@ -671,9 +697,10 @@ async function syncPositionsFromExchange(cachedPositions?: any[]) {
   const exchangeClient = createExchangeClient();
   
   try {
+    await ensurePositionsColumns();
     // 如果提供了缓存数据，使用缓存；否则重新获取
     const gatePositions = cachedPositions || await exchangeClient.getPositions();
-    const dbResult = await dbClient.execute("SELECT symbol, sl_order_id, tp_order_id, stop_loss, profit_target, entry_order_id, opened_at, peak_pnl_percent, partial_close_percentage FROM positions");
+    const dbResult = await dbClient.execute("SELECT symbol, sl_order_id, tp_order_id, stop_loss, profit_target, entry_order_id, opened_at, peak_pnl_percent, partial_close_percentage, system_tp_count, system_trailing_level FROM positions");
     const dbPositionsMap = new Map(
       dbResult.rows.map((row: any) => [row.symbol, row])
     );
@@ -732,8 +759,8 @@ async function syncPositionsFromExchange(cachedPositions?: any[]) {
       await dbClient.execute({
         sql: `INSERT INTO positions 
               (symbol, quantity, entry_price, current_price, liquidation_price, unrealized_pnl, 
-               leverage, side, stop_loss, profit_target, sl_order_id, tp_order_id, entry_order_id, opened_at, peak_pnl_percent, partial_close_percentage)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               leverage, side, stop_loss, profit_target, sl_order_id, tp_order_id, entry_order_id, opened_at, peak_pnl_percent, partial_close_percentage, system_tp_count, system_trailing_level)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           symbol,
           quantity,
@@ -751,6 +778,8 @@ async function syncPositionsFromExchange(cachedPositions?: any[]) {
           dbPos?.opened_at || new Date().toISOString(), // 保留原有的开仓时间
           dbPos?.peak_pnl_percent || 0, // 保留峰值盈利
           dbPos?.partial_close_percentage || 0, // 保留已平仓百分比（关键修复）
+          dbPos?.system_tp_count || 0, // 保留系统止盈计数
+          dbPos?.system_trailing_level || 0,
         ],
       });
       
@@ -791,7 +820,18 @@ async function getPositions(cachedGatePositions?: any[]) {
       .map((p: any) => {
         const size = Number.parseInt(p.size || "0");
         const symbol = p.contract.replace("_USDT", "");
-        
+        const entryPrice = Number.parseFloat(p.entryPrice || "0");
+        const currentPrice = Number.parseFloat(p.markPrice || "0");
+        const leverage = Number.parseInt(p.leverage || "1");
+        const priceChangePercent =
+          entryPrice > 0
+            ? ((currentPrice - entryPrice) / entryPrice) *
+              100 *
+              (size > 0 ? 1 : -1)
+            : 0;
+        const pnlPercent = priceChangePercent * leverage;
+        const unrealisedPnl = Number.parseFloat(p.unrealisedPnl || "0");
+
         // 优先从数据库读取开仓时间，确保时间准确
         let openedAt = dbOpenedAtMap.get(symbol);
         
@@ -811,25 +851,321 @@ async function getPositions(cachedGatePositions?: any[]) {
           logger.warn(`${symbol} 持仓的开仓时间缺失，使用当前时间`);
         }
         
-        return {
-          symbol,
-          contract: p.contract,
-          quantity: Math.abs(size),
-          side: size > 0 ? "long" : "short",
-          entry_price: Number.parseFloat(p.entryPrice || "0"),
-          current_price: Number.parseFloat(p.markPrice || "0"),
-          liquidation_price: Number.parseFloat(p.liqPrice || "0"),
-          unrealized_pnl: Number.parseFloat(p.unrealisedPnl || "0"),
-          leverage: Number.parseInt(p.leverage || "1"),
-          margin: Number.parseFloat(p.margin || "0"),
-          opened_at: openedAt,
-        };
+      return {
+        symbol,
+        contract: p.contract,
+        quantity: Math.abs(size),
+        side: size > 0 ? "long" : "short",
+        entry_price: entryPrice,
+        current_price: currentPrice,
+        liquidation_price: Number.parseFloat(p.liqPrice || "0"),
+        unrealized_pnl: unrealisedPnl,
+        leverage,
+        margin: Number.parseFloat(p.margin || "0"),
+        opened_at: openedAt,
+        price_change_percent: priceChangePercent,
+        pnl_percent: pnlPercent,
+      };
       });
     
     return positions;
   } catch (error) {
     logger.error("获取持仓失败:", error as any);
     return [];
+  }
+}
+
+type ClosePositionResult = {
+  success: boolean;
+  message?: string;
+  error?: string;
+};
+
+async function invokeSystemClosePosition(symbol: string, percentage: number): Promise<ClosePositionResult> {
+  if (typeof closePositionTool.execute !== "function") {
+    throw new Error("closePositionTool.execute 未定义");
+  }
+  return closePositionTool.execute({
+    symbol: symbol as (typeof RISK_PARAMS.TRADING_SYMBOLS)[number],
+    percentage,
+  }) as Promise<ClosePositionResult>;
+}
+
+async function recordTradeHistoryEntry(params: {
+  symbol: string;
+  side: "long" | "short";
+  type: string;
+  price: number;
+  quantity: number;
+  leverage: number;
+  pnl?: number | null;
+  fee?: number | null;
+}) {
+  try {
+    await dbClient.execute({
+      sql: `INSERT INTO trades (order_id, symbol, side, type, price, quantity, leverage, pnl, fee, timestamp, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        `system-${params.symbol}-${Date.now()}`,
+        params.symbol,
+        params.side,
+        params.type,
+        params.price,
+        params.quantity,
+        params.leverage,
+        params.pnl ?? null,
+        params.fee ?? 0,
+        new Date().toISOString(),
+        "system-close",
+      ],
+    });
+  } catch (error) {
+    logger.warn("记录系统风控交易失败:", error as any);
+  }
+}
+
+async function performSystemProtection() {
+  if (!systemProtectionConfig.enabled) {
+    return;
+  }
+  if (systemProtectionExecuting) {
+    return;
+  }
+  const { takeProfitPercent, stopLossPercent } = systemProtectionConfig;
+  const trailingActive =
+    systemProtectionConfig.trailingEnabled &&
+    (systemProtectionConfig.trailingTiers?.length ?? 0) > 0;
+  const tpActive =
+    systemProtectionConfig.takeProfitEnabled && takeProfitPercent > 0;
+  const slActive =
+    systemProtectionConfig.stopLossEnabled && stopLossPercent > 0;
+  if (!tpActive && !slActive && !trailingActive) {
+    return;
+  }
+
+  systemProtectionExecuting = true;
+  try {
+    await ensurePositionsColumns();
+    const positions = await getPositions();
+    if (!positions || positions.length === 0) {
+      return;
+    }
+
+    // 从数据库读取系统止盈/移动止盈状态
+    const protectionRows = await dbClient.execute(
+      "SELECT symbol, system_tp_count, system_trailing_level, peak_pnl_percent FROM positions",
+    );
+    const tpCountMap = new Map<string, number>();
+    const trailingLevelMap = new Map<string, number>();
+    const peakMap = new Map<string, number>();
+    for (const row of protectionRows.rows as any[]) {
+      const sym = row.symbol as string;
+      const cnt = Number.parseInt((row.system_tp_count as string) ?? "0", 10);
+      tpCountMap.set(sym, Number.isFinite(cnt) ? cnt : 0);
+      const lvl = Number.parseInt(
+        (row.system_trailing_level as string) ?? "0",
+        10,
+      );
+      trailingLevelMap.set(sym, Number.isFinite(lvl) ? lvl : 0);
+      const peak = Number.parseFloat(
+        (row.peak_pnl_percent as string) ?? "0",
+      );
+      peakMap.set(sym, Number.isFinite(peak) ? peak : 0);
+    }
+
+    const actions: string[] = [];
+
+    const trailingTiers = systemProtectionConfig.trailingTiers || [];
+
+    for (const pos of positions) {
+      const symbol = pos.symbol;
+      const quantity = Number(pos.quantity || 0);
+      if (!quantity) {
+        continue;
+      }
+
+      const entryPrice = Number(pos.entry_price || pos.entryPrice || 0);
+      const currentPrice = Number(pos.current_price || pos.currentPrice || 0);
+      const leverage = Number(pos.leverage || 1);
+      let pnlPercent = Number.isFinite(pos.pnl_percent)
+        ? Number(pos.pnl_percent)
+        : entryPrice > 0
+          ? ((currentPrice - entryPrice) / entryPrice) * 100 * (pos.side === "long" ? 1 : -1) * leverage
+          : 0;
+
+      let storedPeak = peakMap.get(symbol) ?? 0;
+      if (!Number.isFinite(storedPeak) || storedPeak < pnlPercent) {
+        storedPeak = pnlPercent;
+        peakMap.set(symbol, storedPeak);
+        await dbClient.execute({
+          sql: "UPDATE positions SET peak_pnl_percent = ? WHERE symbol = ?",
+          args: [storedPeak, symbol],
+        });
+        logger.info(`系统移动止盈监控：${symbol} 峰值更新为 ${storedPeak.toFixed(2)}%`);
+      }
+
+      let triggered = false;
+
+      if (
+        systemProtectionConfig.trailingEnabled &&
+        trailingTiers.length > 0
+      ) {
+        let level = trailingLevelMap.get(symbol) ?? 0;
+        let desiredLevel = level;
+        for (let i = 0; i < trailingTiers.length; i++) {
+          if (storedPeak >= trailingTiers[i].trigger) {
+            desiredLevel = Math.max(desiredLevel, i + 1);
+          }
+        }
+        if (desiredLevel !== level) {
+          await dbClient.execute({
+            sql: "UPDATE positions SET system_trailing_level = ? WHERE symbol = ?",
+            args: [desiredLevel, symbol],
+          });
+          trailingLevelMap.set(symbol, desiredLevel);
+          level = desiredLevel;
+          logger.info(`系统移动止盈监控：${symbol} 进入第 ${level} 档 (峰值 ${storedPeak.toFixed(2)}%)`);
+        }
+        if (level > 0) {
+          const activeTier = trailingTiers[level - 1];
+          if (pnlPercent <= activeTier.lock) {
+            const percentage = Math.min(
+              100,
+              Math.max(1, Math.round(activeTier.closePercent)),
+            );
+            const result = await invokeSystemClosePosition(symbol, percentage);
+            if (result.success) {
+              triggered = true;
+              actions.push(
+                `系统移动止盈 ${symbol}：触发第${level}档 (峰值 ${storedPeak.toFixed(2)}%，回落至 ${pnlPercent.toFixed(2)}%)，平仓 ${percentage}%`,
+              );
+              await recordTradeHistoryEntry({
+                symbol,
+                side: pos.side,
+                type: "close",
+                price: currentPrice,
+                quantity: pos.quantity * (percentage / 100),
+                leverage,
+                pnl: Number.isFinite(pos.unrealized_pnl)
+                  ? pos.unrealized_pnl * (percentage / 100)
+                  : null,
+              });
+              await dbClient.execute({
+                sql: "UPDATE positions SET system_trailing_level = 0, system_tp_count = 0, peak_pnl_percent = ? WHERE symbol = ?",
+                args: [pnlPercent, symbol],
+              });
+              trailingLevelMap.set(symbol, 0);
+              tpCountMap.set(symbol, 0);
+            } else {
+              logger.warn(
+                `系统移动止盈 ${symbol} 失败: ${(result as ClosePositionResult).message ?? (result as ClosePositionResult).error}`,
+              );
+            }
+          }
+        }
+      }
+
+      if (triggered) {
+        continue;
+      }
+
+      if (
+        systemProtectionConfig.takeProfitEnabled &&
+        takeProfitPercent > 0 &&
+        pnlPercent >= takeProfitPercent
+      ) {
+        const usedCount = tpCountMap.get(symbol) ?? 0;
+        if (usedCount >= systemProtectionConfig.takeProfitMaxTriggers) {
+          logger.info(`系统止盈已达上限，跳过 ${symbol}（已触发 ${usedCount} 次）`);
+        } else {
+          const percentage = Math.min(
+            100,
+            Math.max(
+              1,
+              Math.round(systemProtectionConfig.takeProfitClosePercent),
+            ),
+          );
+          const result = await invokeSystemClosePosition(symbol, percentage);
+          if (result.success) {
+            triggered = true;
+            actions.push(
+              `系统止盈 ${symbol}：杠杆盈亏 ${pnlPercent.toFixed(2)}%，平仓 ${percentage}%`,
+            );
+            await recordTradeHistoryEntry({
+              symbol,
+              side: pos.side,
+              type: "close",
+              price: currentPrice,
+              quantity: pos.quantity * (percentage / 100),
+              leverage,
+              pnl: Number.isFinite(pos.unrealized_pnl) ? pos.unrealized_pnl * (percentage / 100) : null,
+            });
+            // 计数 +1
+            try {
+              await dbClient.execute({
+                sql: "UPDATE positions SET system_tp_count = COALESCE(system_tp_count, 0) + 1 WHERE symbol = ?",
+                args: [symbol],
+              });
+              tpCountMap.set(symbol, usedCount + 1);
+            } catch (err) {
+              logger.warn(`更新系统止盈计数失败 ${symbol}:`, err as any);
+            }
+          } else {
+            logger.warn(`系统止盈 ${symbol} 失败: ${(result as ClosePositionResult).message ?? (result as ClosePositionResult).error}`);
+          }
+        }
+        if (triggered) {
+          continue;
+        }
+      } else if (
+        systemProtectionConfig.stopLossEnabled &&
+        stopLossPercent > 0 &&
+        pnlPercent <= -stopLossPercent
+      ) {
+        const percentage = Math.min(
+          100,
+          Math.max(
+            1,
+            Math.round(
+              systemProtectionConfig.stopLossClosePercent || 100,
+            ),
+          ),
+        );
+        const result = await invokeSystemClosePosition(symbol, percentage);
+        if (result.success) {
+          triggered = true;
+          actions.push(
+            `系统止损 ${symbol}：杠杆盈亏 ${pnlPercent.toFixed(2)}%，平仓 ${percentage}%`,
+          );
+          await recordTradeHistoryEntry({
+            symbol,
+            side: pos.side,
+            type: "close",
+            price: currentPrice,
+            quantity: pos.quantity * (percentage / 100),
+            leverage,
+            pnl: Number.isFinite(pos.unrealized_pnl) ? pos.unrealized_pnl * (percentage / 100) : null,
+          });
+        } else {
+          logger.warn(`系统止损 ${symbol} 失败: ${(result as ClosePositionResult).message ?? (result as ClosePositionResult).error}`);
+        }
+        if (triggered) {
+          continue;
+        }
+      }
+
+      if (triggered) {
+        logger.info(`系统风控已执行：${actions.at(-1)}`);
+      }
+    }
+
+    if (actions.length > 0) {
+      logger.info(`系统风控完成：\n${actions.join("\n")}`);
+    }
+  } catch (error) {
+    logger.error("系统风控执行失败:", error as any);
+  } finally {
+    systemProtectionExecuting = false;
   }
 }
 
@@ -1121,29 +1457,49 @@ async function executeTradingDecision() {
   logger.info(`交易周期 #${iterationCount} (运行${minutesElapsed}分钟)`);
   logger.info(`${"=".repeat(80)}\n`);
 
+  const agentProfile = (process.env.AI_AGENT_PROFILE || "default").toLowerCase();
+  const useNakedKAgent = ["naked-k", "nakedk", "naked"].includes(agentProfile);
+
   let marketData: any = {};
+  let nakedKData: any = null;
   let accountInfo: any = null;
   let positions: any[] = [];
 
   try {
     // 1. 收集市场数据
-    try {
-      marketData = await collectMarketData();
-      const validSymbols = SYMBOLS.filter(symbol => {
-        const data = marketData[symbol];
-        if (!data || data.price === 0) {
-          return false;
+    if (useNakedKAgent) {
+      try {
+        nakedKData = await collectNakedKData(SYMBOLS);
+        if (
+          !nakedKData ||
+          Object.keys(nakedKData).length === 0
+        ) {
+          logger.error("裸K 数据获取失败，跳过本次循环");
+          return;
         }
-        return true;
-      });
-      
-      if (validSymbols.length === 0) {
-        logger.error("市场数据获取失败，跳过本次循环");
+      } catch (error) {
+        logger.error("收集裸K 数据失败:", error as any);
         return;
       }
-    } catch (error) {
-      logger.error("收集市场数据失败:", error as any);
-      return;
+    } else {
+      try {
+        marketData = await collectMarketData();
+        const validSymbols = SYMBOLS.filter(symbol => {
+          const data = marketData[symbol];
+          if (!data || data.price === 0) {
+            return false;
+          }
+          return true;
+        });
+        
+        if (validSymbols.length === 0) {
+          logger.error("市场数据获取失败，跳过本次循环");
+          return;
+        }
+      } catch (error) {
+        logger.error("收集市场数据失败:", error as any);
+        return;
+      }
     }
     
     // 2. 获取账户信息
@@ -1446,14 +1802,24 @@ async function executeTradingDecision() {
     // }
     
     // 5. 数据完整性最终检查
-    const dataValid = 
-      marketData && Object.keys(marketData).length > 0 &&
-      accountInfo && accountInfo.totalBalance > 0 &&
+    const hasMarketDataset = useNakedKAgent
+      ? nakedKData && Object.keys(nakedKData).length > 0
+      : marketData && Object.keys(marketData).length > 0;
+    const dataValid =
+      hasMarketDataset &&
+      accountInfo &&
+      accountInfo.totalBalance > 0 &&
       Array.isArray(positions);
     
     if (!dataValid) {
       logger.error("数据完整性检查失败，跳过本次循环");
-      logger.error(`市场数据: ${Object.keys(marketData).length}, 账户: ${accountInfo?.totalBalance}, 持仓: ${positions.length}`);
+      logger.error(
+        `数据详情 -> ${
+          useNakedKAgent
+            ? `裸K数据: ${Object.keys(nakedKData || {}).length}`
+            : `市场数据: ${Object.keys(marketData || {}).length}`
+        }, 账户: ${accountInfo?.totalBalance}, 持仓: ${positions.length}`,
+      );
       return;
     }
     
@@ -1484,16 +1850,27 @@ async function executeTradingDecision() {
     }
     
     // 9. 生成提示词并调用 Agent
-    const prompt = generateTradingPrompt({
-      minutesElapsed,
-      iteration: iterationCount,
-      intervalMinutes,
-      marketData,
-      accountInfo,
-      positions,
-      tradeHistory,
-      recentDecisions,
-    });
+    const prompt = useNakedKAgent
+      ? generateNakedKPrompt({
+          minutesElapsed,
+          iteration: iterationCount,
+          intervalMinutes,
+          nakedKData,
+          accountInfo,
+          positions,
+          tradeHistory,
+          recentDecisions,
+        })
+      : generateTradingPrompt({
+          minutesElapsed,
+          iteration: iterationCount,
+          intervalMinutes,
+          marketData,
+          accountInfo,
+          positions,
+          tradeHistory,
+          recentDecisions,
+        });
     
     // 输出完整提示词到日志
     logger.info("【入参 - AI 提示词】");
@@ -1501,7 +1878,9 @@ async function executeTradingDecision() {
     logger.info(prompt);
     logger.info("=".repeat(80) + "\n");
     
-    const agent = createTradingAgent(intervalMinutes);
+    const agent = useNakedKAgent
+      ? createNakedKAgent(intervalMinutes)
+      : createTradingAgent(intervalMinutes);
     
     try {
       // 设置足够大的 maxOutputTokens 以避免输出被截断
@@ -1718,6 +2097,23 @@ export function startTradingLoop() {
   });
   
   logger.info(`定时任务已设置: ${cronExpression}`);
+
+  if (systemProtectionConfig.enabled) {
+    const interval = Math.max(systemProtectionConfig.checkIntervalMs, 1000);
+    logger.info(
+      `系统止盈止损已启用：TP=${systemProtectionConfig.takeProfitPercent}% (平仓${systemProtectionConfig.takeProfitClosePercent}%)，SL=${systemProtectionConfig.stopLossPercent}% (平仓${systemProtectionConfig.stopLossClosePercent}%)，检查间隔 ${interval / 1000}s`,
+    );
+    performSystemProtection().catch((error) => {
+      logger.error("系统风控初始化执行失败:", error as any);
+    });
+    systemProtectionTimer = setInterval(() => {
+      performSystemProtection().catch((error) => {
+        logger.error("系统风控执行异常:", error as any);
+      });
+    }, interval);
+  } else {
+    logger.info("系统止盈止损未启用。");
+  }
 }
 
 /**

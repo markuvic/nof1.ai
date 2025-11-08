@@ -579,10 +579,10 @@ export function generateTradingPrompt(data: {
   // 当前持仓和表现
   if (positions.length > 0) {
     prompt += `以下是您当前的持仓信息。重要说明：\n`;
-    prompt += `- 所有"盈亏百分比"都是考虑杠杆后的值，公式为：盈亏百分比 = (价格变动%) × 杠杆倍数\n`;
+    prompt += `- “杠杆盈亏百分比” 已帮您乘以杠杆，直接代表保证金盈亏幅度\n`;
     prompt += `- 例如：10倍杠杆，价格上涨0.5%，则盈亏百分比 = +5%（保证金增值5%）\n`;
-    prompt += `- 这样设计是为了让您直观理解实际收益：+10% 就是本金增值10%，-10% 就是本金亏损10%\n`;
-    prompt += `- 请直接使用系统提供的盈亏百分比，不要自己重新计算\n\n`;
+    prompt += `- 括号内的“原始价格变动”仅供对照，不包含杠杆\n`;
+    prompt += `- 请以系统提供的“杠杆盈亏百分比”为准，不要自己重新计算\n\n`;
     for (const pos of positions) {
       // 计算盈亏百分比：考虑杠杆倍数
       // 对于杠杆交易：盈亏百分比 = (价格变动百分比) × 杠杆倍数
@@ -603,7 +603,8 @@ export function generateTradingPrompt(data: {
       
       prompt += `当前活跃持仓: ${pos.symbol} ${pos.side === 'long' ? '做多' : '做空'}\n`;
       prompt += `  杠杆倍数: ${pos.leverage}x\n`;
-      prompt += `  盈亏百分比: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}% (已考虑杠杆倍数)\n`;
+      prompt += `  杠杆盈亏百分比: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%\n`;
+      prompt += `  原始价格变动: ${priceChangePercent >= 0 ? '+' : ''}${priceChangePercent.toFixed(2)}%（未乘杠杆，仅供对照）\n`;
       prompt += `  盈亏金额: ${pos.unrealized_pnl >= 0 ? '+' : ''}${pos.unrealized_pnl.toFixed(2)} USDT\n`;
       prompt += `  开仓价: ${pos.entry_price.toFixed(2)}\n`;
       prompt += `  当前价: ${pos.current_price.toFixed(2)}\n`;

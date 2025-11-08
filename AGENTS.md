@@ -21,6 +21,12 @@ This playbook supports contributors building the AI-driven trading agent that po
 - Name files and modules with kebab-case (`trading-loop.ts`), export classes with PascalCase, and functions/instances with camelCase.
 - Keep environment-specific constants in `src/config/` and guard direct `.env` access to boot-time code.
 - Binance dry-run mode mirrors freqtrade’s `dry-run`: set `EXCHANGE_DRY_RUN=true` (Binance only) to consume live quotes while executing orders against the in-process simulator (`src/services/exchanges/dryRunExchangeClient.ts`). Dry-run 会自动把钱包余额、持仓、订单和成交记录持久化到 `.voltagent/dry-run-state.json`（可用 `DRY_RUN_STATE_PATH` 自定义路径，或用 `DRY_RUN_RESET=true` 清空）。Document expected behaviour in PRs when toggling this flag.
+- 裸K Agent：通过 `AI_AGENT_PROFILE=naked-k` 切换至裸K 决策模式，系统会按 `NAKED_K_PROFILE`（baseline/scalper/swing）缓存多时间框架的 OHLCV 数据，并在每轮只增量刷新。默认缓存位置 `.voltagent/kline-cache/`。
+- 系统风控（止盈/移动止盈/止损）：通过 `SYSTEM_PROTECTION_ENABLED=true` 打开独立风控，每 `SYSTEM_PROTECTION_INTERVAL_SECONDS` 秒巡检一次。配置项：
+  - `SYSTEM_TAKE_PROFIT_ENABLED` + `SYSTEM_TAKE_PROFIT_PERCENT` / `SYSTEM_TAKE_PROFIT_CLOSE_PERCENT` / `SYSTEM_TAKE_PROFIT_MAX_TRIGGERS`
+  - `SYSTEM_STOP_LOSS_ENABLED` + `SYSTEM_STOP_LOSS_PERCENT` / `SYSTEM_STOP_LOSS_CLOSE_PERCENT`
+  - `SYSTEM_TRAILING_ENABLED` + `SYSTEM_TRAILING_TIERS`（如 `5:2:25,10:5:50,15:12:100`，表示利润达 5% 时锁在 2%、平 25%，达 10% 时锁 5%、平 50%，达 15% 时直接全平）
+  - 系统触发的平仓会记入 `trades` 表，并在提示词的“最近交易”段出现，AI 能感知系统已锁定利润。
 - Telegram notifications are optional: set `TELEGRAM_BOT_TOKEN` to enable the bot (`src/services/telegramBot.ts`). Keep notifier calls (`src/services/notifier.ts`) side-effect free so missing credentials never break trade execution.
 
 ## Configuration Notes

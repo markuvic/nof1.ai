@@ -17,7 +17,7 @@ export interface ExchangeClient {
     contract: string,
     interval?: string,
     limit?: number,
-    retries?: number,
+    retriesOrOptions?: number | { startTime?: number; endTime?: number; retries?: number },
   ): Promise<any>;
   getFuturesAccount(retries?: number): Promise<any>;
   getPositions(retries?: number): Promise<any>;

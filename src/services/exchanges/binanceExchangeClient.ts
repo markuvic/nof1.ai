@@ -512,15 +512,33 @@ export class BinanceExchangeClient implements ExchangeClient {
     contract: string,
     interval: string = "5m",
     limit: number = 100,
-    retries: number = 2,
+    options?: number | { startTime?: number; endTime?: number; retries?: number },
   ) {
+    let startTime: number | undefined;
+    let endTime: number | undefined;
+    let retries = 2;
+    if (typeof options === "number") {
+      retries = options;
+    } else if (options) {
+      startTime = options.startTime;
+      endTime = options.endTime;
+      if (Number.isFinite(options.retries)) {
+        retries = options.retries!;
+      }
+    }
     let lastError: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const symbol = toSymbol(contract);
         const data = await this.request<any[]>({
           path: "/fapi/v1/klines",
-          params: { symbol, interval, limit },
+          params: {
+            symbol,
+            interval,
+            limit,
+            startTime,
+            endTime,
+          },
         });
         return data.map((candle: any[]) => ({
           t: candle[0],

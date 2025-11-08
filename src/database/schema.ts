@@ -143,7 +143,9 @@ CREATE TABLE IF NOT EXISTS positions (
   confidence REAL,
   risk_usd REAL,
   peak_pnl_percent REAL DEFAULT 0,
-  partial_close_percentage REAL DEFAULT 0
+  partial_close_percentage REAL DEFAULT 0,
+  system_tp_count INTEGER DEFAULT 0,
+  system_trailing_level INTEGER DEFAULT 0
 );
 
 -- 账户历史表
@@ -204,4 +206,3 @@ CREATE INDEX IF NOT EXISTS idx_signals_symbol ON trading_signals(symbol);
 CREATE INDEX IF NOT EXISTS idx_history_timestamp ON account_history(timestamp);
 CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON agent_decisions(timestamp);
 `;
-
