@@ -24,12 +24,14 @@ import { createPinoLogger } from "@voltagent/logger";
 import { createClient } from "@libsql/client";
 import { createTradingAgent, generateTradingPrompt, getAccountRiskConfig, getTradingStrategy, getStrategyParams } from "../agents/tradingAgent";
 import { createNakedKAgent, generateNakedKPrompt } from "../agents/nakedKAgent";
+import { createHybridAutonomousAgent, generateHybridPrompt } from "../agents/hybridAutonomousAgent";
 import {
   createExchangeClient,
   getActiveExchangeId,
   isDryRunMode,
 } from "../services/exchanges";
 import { collectNakedKData } from "../services/marketData/nakedKCollector";
+import { buildHybridContext, type HybridContext } from "../services/hybridContext";
 import { getChinaTimeISO } from "../utils/timeUtils";
 import { getSystemProtectionConfig } from "../config/systemProtection";
 import { closePositionTool } from "../tools/trading/tradeExecution";
@@ -1457,17 +1459,34 @@ async function executeTradingDecision() {
   logger.info(`交易周期 #${iterationCount} (运行${minutesElapsed}分钟)`);
   logger.info(`${"=".repeat(80)}\n`);
 
-  const agentProfile = (process.env.AI_AGENT_PROFILE || "default").toLowerCase();
-  const useNakedKAgent = ["naked-k", "nakedk", "naked"].includes(agentProfile);
+  const agentProfileRaw = process.env.AI_AGENT_PROFILE || "default";
+  const agentProfile = agentProfileRaw.trim().toLowerCase();
+  const normalizedProfile = agentProfile.replace(/[\s_]+/g, "-");
+  const useNakedKAgent = ["naked-k", "nakedk", "naked"].includes(normalizedProfile);
+  const useHybridAgent = ["hybrid", "hybrid-agent", "hybrid-autonomous", "hybrid-autonomous-agent", "hybridautonomous", "hybridagent"].includes(normalizedProfile);
+  logger.info(`当前 AI Agent Profile: ${normalizedProfile}`);
 
   let marketData: any = {};
   let nakedKData: any = null;
+  let hybridContext: HybridContext | null = null;
   let accountInfo: any = null;
   let positions: any[] = [];
 
   try {
     // 1. 收集市场数据
-    if (useNakedKAgent) {
+    if (useHybridAgent) {
+      try {
+        hybridContext = await buildHybridContext(SYMBOLS);
+        const snapshotCount = Object.keys(hybridContext.snapshots || {}).length;
+        if (snapshotCount === 0) {
+          logger.error("混合 Agent 上下文为空，跳过本次循环");
+          return;
+        }
+      } catch (error) {
+        logger.error("构建混合 Agent 数据上下文失败:", error as any);
+        return;
+      }
+    } else if (useNakedKAgent) {
       try {
         nakedKData = await collectNakedKData(SYMBOLS);
         if (
@@ -1802,9 +1821,11 @@ async function executeTradingDecision() {
     // }
     
     // 5. 数据完整性最终检查
-    const hasMarketDataset = useNakedKAgent
-      ? nakedKData && Object.keys(nakedKData).length > 0
-      : marketData && Object.keys(marketData).length > 0;
+    const hasMarketDataset = useHybridAgent
+      ? hybridContext && Object.keys(hybridContext.snapshots || {}).length > 0
+      : useNakedKAgent
+        ? nakedKData && Object.keys(nakedKData).length > 0
+        : marketData && Object.keys(marketData).length > 0;
     const dataValid =
       hasMarketDataset &&
       accountInfo &&
@@ -1850,27 +1871,38 @@ async function executeTradingDecision() {
     }
     
     // 9. 生成提示词并调用 Agent
-    const prompt = useNakedKAgent
-      ? generateNakedKPrompt({
+    const prompt = useHybridAgent
+      ? generateHybridPrompt({
           minutesElapsed,
           iteration: iterationCount,
           intervalMinutes,
-          nakedKData,
+          hybridContext: hybridContext!,
           accountInfo,
           positions,
           tradeHistory,
           recentDecisions,
         })
-      : generateTradingPrompt({
-          minutesElapsed,
-          iteration: iterationCount,
-          intervalMinutes,
-          marketData,
-          accountInfo,
-          positions,
-          tradeHistory,
-          recentDecisions,
-        });
+      : useNakedKAgent
+        ? generateNakedKPrompt({
+            minutesElapsed,
+            iteration: iterationCount,
+            intervalMinutes,
+            nakedKData,
+            accountInfo,
+            positions,
+            tradeHistory,
+            recentDecisions,
+          })
+        : generateTradingPrompt({
+            minutesElapsed,
+            iteration: iterationCount,
+            intervalMinutes,
+            marketData,
+            accountInfo,
+            positions,
+            tradeHistory,
+            recentDecisions,
+          });
     
     // 输出完整提示词到日志
     logger.info("【入参 - AI 提示词】");
@@ -1878,9 +1910,11 @@ async function executeTradingDecision() {
     logger.info(prompt);
     logger.info("=".repeat(80) + "\n");
     
-    const agent = useNakedKAgent
-      ? createNakedKAgent(intervalMinutes)
-      : createTradingAgent(intervalMinutes);
+    const agent = useHybridAgent
+      ? createHybridAutonomousAgent(intervalMinutes)
+      : useNakedKAgent
+        ? createNakedKAgent(intervalMinutes)
+        : createTradingAgent(intervalMinutes);
     
     try {
       // 设置足够大的 maxOutputTokens 以避免输出被截断
