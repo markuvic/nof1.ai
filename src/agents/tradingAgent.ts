@@ -73,11 +73,293 @@ const logger = createLogger({
  */
 export function getTradingStrategy(): TradingStrategy {
   const strategy = process.env.TRADING_STRATEGY || "balanced";
-  if (strategy === "conservative" || strategy === "balanced" || strategy === "aggressive" || strategy === "ultra-short" || strategy === "swing-trend" || strategy === "rebate-farming") {
+  if (strategy === "conservative" || strategy === "balanced" || strategy === "aggressive" || strategy === "ultra-short" || strategy === "swing-trend" || strategy === "rebate-farming" || strategy === "ai-autonomous") {
     return strategy;
   }
   logger.warn(`未知的交易策略: ${strategy}，使用默认策略: balanced`);
   return "balanced";
+}
+
+/**
+ * 生成AI自主策略的交易提示词（极简版，只提供数据和工具）
+ */
+function generateAiAutonomousPromptForCycle(data: {
+  minutesElapsed: number;
+  iteration: number;
+  intervalMinutes: number;
+  marketData: any;
+  accountInfo: any;
+  positions: any[];
+  tradeHistory?: any[];
+  recentDecisions?: any[];
+}): string {
+  const { minutesElapsed, iteration, intervalMinutes, marketData, accountInfo, positions, tradeHistory, recentDecisions } = data;
+  const currentTime = formatChinaTime();
+  
+  let prompt = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【交易周期 #${iteration}】${currentTime}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+已运行: ${minutesElapsed} 分钟
+执行周期: 每 ${intervalMinutes} 分钟
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【系统硬性风控底线】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+• 单笔亏损 ≤ ${RISK_PARAMS.EXTREME_STOP_LOSS_PERCENT}%：系统强制平仓
+• 持仓时间 ≥ ${RISK_PARAMS.MAX_HOLDING_HOURS} 小时：系统强制平仓
+• 最大杠杆：${RISK_PARAMS.MAX_LEVERAGE} 倍
+• 最大持仓数：${RISK_PARAMS.MAX_POSITIONS} 个
+• 可交易币种：${RISK_PARAMS.TRADING_SYMBOLS.join(", ")}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【当前账户状态】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+总资产: ${(accountInfo?.totalBalance ?? 0).toFixed(2)} USDT
+可用余额: ${(accountInfo?.availableBalance ?? 0).toFixed(2)} USDT
+未实现盈亏: ${(accountInfo?.unrealisedPnl ?? 0) >= 0 ? '+' : ''}${(accountInfo?.unrealisedPnl ?? 0).toFixed(2)} USDT
+持仓数量: ${positions?.length ?? 0} 个
+
+`;
+
+  // 输出持仓信息
+  if (positions && positions.length > 0) {
+    prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【当前持仓】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+`;
+    for (const pos of positions) {
+      const holdingMinutes = Math.floor((new Date().getTime() - new Date(pos.opened_at).getTime()) / (1000 * 60));
+      const holdingHours = (holdingMinutes / 60).toFixed(1);
+      
+      // 计算盈亏百分比
+      const entryPrice = pos.entry_price ?? 0;
+      const currentPrice = pos.current_price ?? 0;
+      const unrealizedPnl = pos.unrealized_pnl ?? 0;
+      let pnlPercent = 0;
+      
+      if (entryPrice > 0 && currentPrice > 0) {
+        if (pos.side === 'long') {
+          pnlPercent = ((currentPrice - entryPrice) / entryPrice) * 100 * (pos.leverage ?? 1);
+        } else {
+          pnlPercent = ((entryPrice - currentPrice) / entryPrice) * 100 * (pos.leverage ?? 1);
+        }
+      }
+      
+      prompt += `${pos.contract} ${pos.side === 'long' ? '做多' : '做空'}:\n`;
+      prompt += `  持仓量: ${pos.quantity ?? 0} 张\n`;
+      prompt += `  杠杆: ${pos.leverage ?? 1}x\n`;
+      prompt += `  入场价: ${entryPrice.toFixed(2)}\n`;
+      prompt += `  当前价: ${currentPrice.toFixed(2)}\n`;
+      prompt += `  盈亏: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}% (${unrealizedPnl >= 0 ? '+' : ''}${unrealizedPnl.toFixed(2)} USDT)\n`;
+      prompt += `  持仓时间: ${holdingHours} 小时\n\n`;
+    }
+  } else {
+    prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【当前持仓】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+无持仓
+
+`;
+  }
+
+  // 输出市场数据
+  prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【市场数据】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+注意：所有价格和指标数据按时间顺序排列（最旧 → 最新）
+
+`;
+
+  // 输出每个币种的市场数据
+  if (marketData) {
+    for (const [symbol, dataRaw] of Object.entries(marketData)) {
+      const data = dataRaw as any;
+      
+      prompt += `\n【${symbol}】\n`;
+      prompt += `当前价格: ${(data?.price ?? 0).toFixed(1)}\n`;
+      prompt += `EMA20: ${(data?.ema20 ?? 0).toFixed(3)}\n`;
+      prompt += `MACD: ${(data?.macd ?? 0).toFixed(3)}\n`;
+      prompt += `RSI(7): ${(data?.rsi7 ?? 0).toFixed(3)}\n`;
+      
+      if (data?.fundingRate !== undefined) {
+        prompt += `资金费率: ${data.fundingRate.toExponential(2)}\n`;
+      }
+      
+      prompt += `\n`;
+      
+      // 输出多时间框架数据
+      if (data?.multiTimeframe) {
+        for (const [timeframe, tfData] of Object.entries(data.multiTimeframe)) {
+          const tf = tfData as any;
+          prompt += `${timeframe} 时间框架:\n`;
+          prompt += `  价格序列: ${(tf?.prices ?? []).map((p: number) => p.toFixed(1)).join(', ')}\n`;
+          prompt += `  EMA20序列: ${(tf?.ema20 ?? []).map((e: number) => e.toFixed(2)).join(', ')}\n`;
+          prompt += `  MACD序列: ${(tf?.macd ?? []).map((m: number) => m.toFixed(3)).join(', ')}\n`;
+          prompt += `  RSI序列: ${(tf?.rsi ?? []).map((r: number) => r.toFixed(1)).join(', ')}\n`;
+          prompt += `  成交量序列: ${(tf?.volumes ?? []).map((v: number) => v.toFixed(0)).join(', ')}\n\n`;
+        }
+      }
+    }
+  }
+
+  // 输出历史交易记录（如果有）
+  if (tradeHistory && tradeHistory.length > 0) {
+    prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【最近交易记录】（最近10笔）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+`;
+    let profitCount = 0;
+    let lossCount = 0;
+    let totalProfit = 0;
+    
+    for (const trade of tradeHistory.slice(0, 10)) {
+      const tradeTime = formatChinaTime(trade.timestamp);
+      const pnl = trade?.pnl ?? 0;
+      
+      // 计算收益率（如果有pnl和价格信息）
+      let pnlPercent = 0;
+      if (pnl !== 0 && trade.price && trade.quantity && trade.leverage) {
+        const positionValue = trade.price * trade.quantity / trade.leverage;
+        if (positionValue > 0) {
+          pnlPercent = (pnl / positionValue) * 100;
+        }
+      }
+      
+      prompt += `${trade.symbol}_USDT ${trade.side === 'long' ? '做多' : '做空'}:\n`;
+      prompt += `  时间: ${tradeTime}\n`;
+      prompt += `  盈亏: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} USDT\n`;
+      if (pnlPercent !== 0) {
+        prompt += `  收益率: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%\n`;
+      }
+      prompt += `\n`;
+      
+      if (pnl > 0) {
+        profitCount++;
+      } else if (pnl < 0) {
+        lossCount++;
+      }
+      totalProfit += pnl;
+    }
+    
+    // 添加统计信息
+    if (profitCount > 0 || lossCount > 0) {
+      const winRate = profitCount / (profitCount + lossCount) * 100;
+      prompt += `最近10笔交易统计:\n`;
+      prompt += `  胜率: ${winRate.toFixed(1)}%\n`;
+      prompt += `  盈利交易: ${profitCount}笔\n`;
+      prompt += `  亏损交易: ${lossCount}笔\n`;
+      prompt += `  净盈亏: ${totalProfit >= 0 ? '+' : ''}${totalProfit.toFixed(2)} USDT\n\n`;
+    }
+  }
+
+  // 输出历史决策记录（如果有）
+  if (recentDecisions && recentDecisions.length > 0) {
+    prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【历史决策记录】（最近5次）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+`;
+    for (let i = 0; i < Math.min(5, recentDecisions.length); i++) {
+      const decision = recentDecisions[i];
+      const decisionTime = formatChinaTime(decision.timestamp);
+      const timeDiff = Math.floor((new Date().getTime() - new Date(decision.timestamp).getTime()) / (1000 * 60));
+      
+      prompt += `周期 #${decision.iteration} (${decisionTime}，${timeDiff}分钟前):\n`;
+      prompt += `  账户价值: ${(decision?.account_value ?? 0).toFixed(2)} USDT\n`;
+      prompt += `  持仓数量: ${decision?.positions_count ?? 0}\n`;
+      prompt += `  决策内容: ${decision?.decision ?? '无'}\n\n`;
+    }
+    
+    prompt += `注意：以上是历史决策记录，仅供参考。请基于当前最新数据独立判断。\n\n`;
+  }
+  
+  // 添加自我复盘要求
+  prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【自我复盘要求】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+在做出交易决策之前，请先进行自我复盘：
+
+1. **回顾最近交易表现**：
+   - 分析最近的盈利交易：什么做对了？（入场时机、杠杆选择、止盈策略等）
+   - 分析最近的亏损交易：什么做错了？（入场过早/过晚、杠杆过高、止损不及时等）
+   - 当前胜率如何？是否需要调整策略？
+
+2. **评估当前策略有效性**：
+   - 当前使用的交易策略是否适应市场环境？
+   - 杠杆和仓位管理是否合理？
+   - 是否存在重复犯错的模式？
+
+3. **识别改进空间**：
+   - 哪些方面可以做得更好？
+   - 是否需要调整风险管理方式？
+   - 是否需要改变交易频率或持仓时间？
+
+4. **制定改进计划**：
+   - 基于复盘结果，本次交易应该如何调整策略？
+   - 需要避免哪些之前犯过的错误？
+   - 如何提高交易质量？
+
+**复盘输出格式**：
+在做出交易决策前，请先输出你的复盘思考（用文字描述），然后再执行交易操作。
+
+例如：
+\`\`\`
+【复盘思考】
+- 最近3笔交易中，2笔盈利1笔亏损，胜率66.7%
+- 盈利交易的共同点：都是在多时间框架共振时入场，使用了适中的杠杆（10-15倍）
+- 亏损交易的问题：入场过早，没有等待足够的确认信号，且使用了过高的杠杆（20倍）
+- 改进计划：本次交易将更加耐心等待信号确认，杠杆控制在15倍以内
+- 当前市场环境：BTC处于震荡区间，应该降低交易频率，只在明确信号时入场
+
+【本次交易决策】
+（然后再执行具体的交易操作）
+\`\`\`
+
+`;
+
+  prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【可用工具】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+• openPosition: 开仓（做多或做空）
+  - 参数: symbol（币种）, side（long/short）, leverage（杠杆）, amountUsdt（金额）
+  - 手续费: 约 0.05%
+
+• closePosition: 平仓
+  - 参数: symbol（币种）, closePercent（平仓百分比，默认100%）
+  - 手续费: 约 0.05%
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【开始交易】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+请基于以上市场数据和账户信息，完全自主地分析市场并做出交易决策。
+你可以选择：
+1. 开新仓位（做多或做空）
+2. 平掉现有仓位
+3. 继续持有
+4. 观望不交易
+
+记住：
+- 没有任何策略建议和限制（除了系统硬性风控底线）
+- 完全由你自主决定交易策略
+- 完全由你自主决定风险管理
+- 完全由你自主决定何时交易
+
+现在请做出你的决策并执行。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+
+  return prompt;
 }
 
 /**
@@ -101,6 +383,11 @@ export function generateTradingPrompt(data: {
   const params = getStrategyParams(strategy);
   // 判断是否启用自动监控止损和移动止盈（根据策略配置）
   const isCodeLevelProtectionEnabled = params.enableCodeLevelProtection;
+  
+  // 如果是AI自主策略，使用完全不同的提示词格式
+  if (strategy === "ai-autonomous") {
+    return generateAiAutonomousPromptForCycle(data);
+  }
   
   // 生成止损规则描述（基于 stopLoss 配置和杠杆范围）
   const generateStopLossDescriptions = () => {
@@ -318,9 +605,9 @@ ${isCodeLevelProtectionEnabled ? `│                                         �
       const now = new Date();
       const holdingMinutes = Math.floor((now.getTime() - openedTime.getTime()) / (1000 * 60));
       const holdingHours = (holdingMinutes / 60).toFixed(1);
-      const remainingHours = Math.max(0, 36 - parseFloat(holdingHours));
+      const remainingHours = Math.max(0, RISK_PARAMS.MAX_HOLDING_HOURS - parseFloat(holdingHours));
       const holdingCycles = Math.floor(holdingMinutes / intervalMinutes); // 根据实际执行周期计算
-      const maxCycles = Math.floor(36 * 60 / intervalMinutes); // 36小时的总周期数
+      const maxCycles = Math.floor(RISK_PARAMS.MAX_HOLDING_HOURS * 60 / intervalMinutes); // 最大持仓时间的总周期数
       const remainingCycles = Math.max(0, maxCycles - holdingCycles);
       
       // 计算峰值回撤（使用绝对回撤，即百分点）
@@ -347,13 +634,13 @@ ${isCodeLevelProtectionEnabled ? `│                                         �
       prompt += `  当前价: ${pos.current_price.toFixed(2)}\n`;
       prompt += `  开仓时间: ${formatChinaTime(pos.opened_at)}\n`;
       prompt += `  已持仓: ${holdingHours} 小时 (${holdingMinutes} 分钟, ${holdingCycles} 个周期)\n`;
-      prompt += `  距离36小时限制: ${remainingHours.toFixed(1)} 小时 (${remainingCycles} 个周期)\n`;
+      prompt += `  距离${RISK_PARAMS.MAX_HOLDING_HOURS}小时限制: ${remainingHours.toFixed(1)} 小时 (${remainingCycles} 个周期)\n`;
       
-      // 如果接近36小时,添加警告
+      // 如果接近最大持仓时间,添加警告
       if (remainingHours < 2) {
-        prompt += `  警告: 即将达到36小时持仓限制,必须立即平仓!\n`;
+        prompt += `  警告: 即将达到${RISK_PARAMS.MAX_HOLDING_HOURS}小时持仓限制,必须立即平仓!\n`;
       } else if (remainingHours < 4) {
-        prompt += `  提醒: 距离36小时限制不足4小时,请准备平仓\n`;
+        prompt += `  提醒: 距离${RISK_PARAMS.MAX_HOLDING_HOURS}小时限制不足4小时,请准备平仓\n`;
       }
       
       prompt += "\n";
@@ -446,6 +733,55 @@ ${isCodeLevelProtectionEnabled ? `│                                         �
  */
 function generateInstructions(strategy: TradingStrategy, intervalMinutes: number): string {
   const params = getStrategyParams(strategy);
+  
+  // 如果是AI自主策略，返回极简的系统提示词
+  if (strategy === "ai-autonomous") {
+    return `你是一个完全自主的AI加密货币交易员，具备自我学习和持续改进的能力。
+
+你的任务是基于提供的市场数据和账户信息，完全自主地分析市场并做出交易决策。
+
+你拥有的能力：
+- 分析多时间框架的市场数据（价格、技术指标、成交量等）
+- 开仓（做多或做空）
+- 平仓（部分或全部）
+- 自主决定交易策略、风险管理、仓位大小、杠杆倍数
+- **自我复盘和持续改进**：从历史交易中学习，识别成功模式和失败原因
+
+系统硬性风控底线（这是唯一的限制）：
+- 单笔亏损达到 ${RISK_PARAMS.EXTREME_STOP_LOSS_PERCENT}% 时，系统会强制平仓
+- 持仓时间超过 ${RISK_PARAMS.MAX_HOLDING_HOURS} 小时，系统会强制平仓
+- 最大杠杆：${RISK_PARAMS.MAX_LEVERAGE} 倍
+- 最大持仓数：${RISK_PARAMS.MAX_POSITIONS} 个
+
+重要提醒：
+- 没有任何策略建议或限制（除了上述系统硬性风控底线）
+- 完全由你自主决定如何交易
+- 完全由你自主决定风险管理
+- 你可以选择任何你认为合适的交易策略和风格
+
+交易成本：
+- 开仓手续费：约 0.05%
+- 平仓手续费：约 0.05%
+- 往返交易成本：约 0.1%
+
+双向交易：
+- 做多（long）：预期价格上涨时开多单
+- 做空（short）：预期价格下跌时开空单
+- 永续合约做空无需借币
+
+**自我复盘机制**：
+每个交易周期，你都应该：
+1. 回顾最近的交易表现（盈利和亏损）
+2. 分析成功和失败的原因
+3. 识别可以改进的地方
+4. 制定本次交易的改进计划
+5. 然后再执行交易决策
+
+这种持续的自我复盘和改进是你成为优秀交易员的关键。
+
+现在，请基于每个周期提供的市场数据，先进行自我复盘，然后再做出交易决策。`;
+  }
+  
   // 判断是否启用自动监控止损和移动止盈（根据策略配置）
   const isCodeLevelProtectionEnabled = params.enableCodeLevelProtection;
   
@@ -657,10 +993,10 @@ ${strategySpecificContent}
   * 总名义敞口不超过账户净值的${params.leverageMax}倍
 - 交易费用：每笔交易约0.05%（往返总计0.1%）。每笔交易应有至少2-3%的盈利潜力。
 - **执行周期**：系统每${intervalMinutes}分钟执行一次，这意味着：
-  * 36小时 = ${Math.floor(36 * 60 / intervalMinutes)}个执行周期
+  * ${RISK_PARAMS.MAX_HOLDING_HOURS}小时 = ${Math.floor(RISK_PARAMS.MAX_HOLDING_HOURS * 60 / intervalMinutes)}个执行周期
   * 您无法实时监控价格波动，必须设置保守的止损和止盈
   * 在${intervalMinutes}分钟内市场可能剧烈波动，因此杠杆必须保守
-- **最大持仓时间**：不要持有任何持仓超过36小时（${Math.floor(36 * 60 / intervalMinutes)}个周期）。无论盈亏，在36小时内平仓所有持仓。
+- **最大持仓时间**：不要持有任何持仓超过${RISK_PARAMS.MAX_HOLDING_HOURS}小时（${Math.floor(RISK_PARAMS.MAX_HOLDING_HOURS * 60 / intervalMinutes)}个周期）。无论盈亏，在${RISK_PARAMS.MAX_HOLDING_HOURS}小时内平仓所有持仓。
 - **开仓前强制检查**：
   1. 使用getAccountBalance检查可用资金和账户净值
   2. 使用getPositions检查现有持仓数量和总敞口
@@ -784,7 +1120,7 @@ ${strategySpecificContent}
   (5) 时间止盈建议：
      * 盈利 > 25% 且持仓 ≥ 4小时 → 可考虑主动获利了结
      * 持仓 > 24小时且未盈利 → 考虑平仓释放资金
-     * 系统会在36小时强制平仓，您无需在35小时主动平仓
+     * 系统会在${RISK_PARAMS.MAX_HOLDING_HOURS}小时强制平仓，您无需在${RISK_PARAMS.MAX_HOLDING_HOURS - 1}小时主动平仓
 - 账户级风控保护：
   * 注意账户回撤情况，谨慎交易
 

@@ -43,6 +43,7 @@ export { getConservativeStrategy, generateConservativePrompt } from "./conservat
 export { getBalancedStrategy, generateBalancedPrompt } from "./balanced";              // 平衡策略
 export { getAggressiveStrategy, generateAggressivePrompt } from "./aggressive";        // 激进策略
 export { getRebateFarmingStrategy, generateRebateFarmingPrompt } from "./rebateFarming";  // 返佣套利策略
+export { getAiAutonomousStrategy, generateAiAutonomousPrompt } from "./aiAutonomous";  // AI自主策略
 
 import type { TradingStrategy, StrategyParams, StrategyPromptContext } from "./types";
 import { getUltraShortStrategy, generateUltraShortPrompt } from "./ultraShort";
@@ -51,6 +52,7 @@ import { getConservativeStrategy, generateConservativePrompt } from "./conservat
 import { getBalancedStrategy, generateBalancedPrompt } from "./balanced";
 import { getAggressiveStrategy, generateAggressivePrompt } from "./aggressive";
 import { getRebateFarmingStrategy, generateRebateFarmingPrompt } from "./rebateFarming";
+import { getAiAutonomousStrategy, generateAiAutonomousPrompt } from "./aiAutonomous";
 
 /**
  * 获取策略参数（基于 MAX_LEVERAGE 动态计算）
@@ -84,8 +86,10 @@ export function getStrategyParams(strategy: TradingStrategy, maxLeverage: number
       return getAggressiveStrategy(maxLeverage);
     case "rebate-farming":
       return getRebateFarmingStrategy(maxLeverage);
+    case "ai-autonomous":
+      return getAiAutonomousStrategy(maxLeverage);
     default:
-      return getBalancedStrategy(maxLeverage);
+      return getAiAutonomousStrategy(maxLeverage);
   }
 }
 
@@ -132,8 +136,10 @@ export function generateStrategySpecificPrompt(
       return generateSwingTrendPrompt(params, context);
     case "rebate-farming":
       return generateRebateFarmingPrompt(params, context);
+    case "ai-autonomous":
+      return generateAiAutonomousPrompt(params, context);
     default:
-      return generateBalancedPrompt(params, context);
+      return generateAiAutonomousPrompt(params, context);
   }
 }
 
