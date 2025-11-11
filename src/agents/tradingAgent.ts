@@ -383,6 +383,8 @@ export function generateTradingPrompt(data: {
   const params = getStrategyParams(strategy);
   // 判断是否启用自动监控止损和移动止盈（根据策略配置）
   const isCodeLevelProtectionEnabled = params.enableCodeLevelProtection;
+  // 判断是否允许AI在代码级保护之外继续主动操作（双重防护模式）
+  const allowAiOverride = params.allowAiOverrideProtection === true;
   
   // 如果是AI自主策略，使用完全不同的提示词格式
   if (strategy === "ai-autonomous") {
@@ -425,12 +427,19 @@ export function generateTradingPrompt(data: {
 │   • 盈利≥+${params.partialTakeProfit.stage2.trigger}% → 平仓${params.partialTakeProfit.stage2.closePercent}%  │
 │   • 盈利≥+${params.partialTakeProfit.stage3.trigger}% → 平仓${params.partialTakeProfit.stage3.closePercent}% │
 │ 峰值回撤：≥${params.peakDrawdownProtection}% → 危险信号，立即平仓 │
-${isCodeLevelProtectionEnabled ? `│                                         │
+${isCodeLevelProtectionEnabled ? (allowAiOverride ? `│                                         │
+│ 🛡️ 双重防护模式：                      │
+│   • 代码自动监控（每10秒）作为安全网   │
+│   • Level1: 峰值${params.trailingStop.level1.trigger}%→止损线${params.trailingStop.level1.stopAt}% │
+│   • Level2: 峰值${params.trailingStop.level2.trigger}%→止损线${params.trailingStop.level2.stopAt}% │
+│   • Level3: 峰值${params.trailingStop.level3.trigger}%→止损线${params.trailingStop.level3.stopAt}% │
+│   • 你可以主动止损止盈，不必等待自动   │
+│   • 主动管理风险是优秀交易员的标志     │` : `│                                         │
 │ 注意：移动止盈由自动监控执行（每10秒） │
 │   • Level1: 峰值${params.trailingStop.level1.trigger}%→止损线${params.trailingStop.level1.stopAt}% │
 │   • Level2: 峰值${params.trailingStop.level2.trigger}%→止损线${params.trailingStop.level2.stopAt}% │
 │   • Level3: 峰值${params.trailingStop.level3.trigger}%→止损线${params.trailingStop.level3.stopAt}% │
-│   • 无需AI手动执行移动止盈              │` : `│                                         │
+│   • 无需AI手动执行移动止盈              │`) : `│                                         │
 │ 注意：当前策略未启用自动监控移动止盈      │
 │   • AI需主动监控峰值回撤并执行止盈      │
 │   • 盈利${params.trailingStop.level1.trigger}%→止损线${params.trailingStop.level1.stopAt}%   │
@@ -747,17 +756,31 @@ function generateInstructions(strategy: TradingStrategy, intervalMinutes: number
 - 自主决定交易策略、风险管理、仓位大小、杠杆倍数
 - **自我复盘和持续改进**：从历史交易中学习，识别成功模式和失败原因
 
-系统硬性风控底线（这是唯一的限制）：
-- 单笔亏损达到 ${RISK_PARAMS.EXTREME_STOP_LOSS_PERCENT}% 时，系统会强制平仓
-- 持仓时间超过 ${RISK_PARAMS.MAX_HOLDING_HOURS} 小时，系统会强制平仓
+🛡️ 双重防护机制（保护你的交易安全）：
+
+**第一层：代码级自动保护**（每10秒监控，自动执行）
+- 自动止损：低杠杆-8%、中杠杆-6%、高杠杆-5%
+- 自动移动止盈：盈利5%→止损线+2%、盈利10%→止损线+5%、盈利15%→止损线+8%
+- 自动分批止盈：盈利8%→平仓30%、盈利12%→平仓30%、盈利18%→平仓40%
+
+**第二层：AI主动决策**（你的灵活操作权）
+- 你可以在代码自动保护触发**之前**主动止损止盈
+- 你可以根据市场情况灵活调整，不必等待自动触发
+- 代码保护是最后的安全网，你有完全的主动权
+- **建议**：看到不利信号时主动止损，看到获利机会时主动止盈
+
+系统硬性风控底线（防止极端风险）：
+- 单笔亏损达到 ${RISK_PARAMS.EXTREME_STOP_LOSS_PERCENT}% 时，系统会强制平仓（防止爆仓）
+- 持仓时间超过 ${RISK_PARAMS.MAX_HOLDING_HOURS} 小时，系统会强制平仓（释放资金）
 - 最大杠杆：${RISK_PARAMS.MAX_LEVERAGE} 倍
 - 最大持仓数：${RISK_PARAMS.MAX_POSITIONS} 个
 
 重要提醒：
-- 没有任何策略建议或限制（除了上述系统硬性风控底线）
+- 没有任何策略建议或限制（除了上述双重防护和系统硬性底线）
 - 完全由你自主决定如何交易
 - 完全由你自主决定风险管理
 - 你可以选择任何你认为合适的交易策略和风格
+- 不要过度依赖自动保护，主动管理风险才是优秀交易员的标志
 
 交易成本：
 - 开仓手续费：约 0.05%
@@ -1376,6 +1399,7 @@ export function createTradingAgent(intervalMinutes: number = 5) {
       tradingTools.syncPositionsTool,
     ],
     memory,
+    logger
   });
 
   return agent;
