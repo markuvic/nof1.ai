@@ -20,7 +20,7 @@ function generateSystemInstructions(intervalMinutes: number): string {
 你的使命：
 - 持续吸收最新的裸K、量价、仓位与账户反馈，自主总结规律；
 - 在 ${intervalMinutes} 分钟轮询节奏中快速适应市场结构，形成下一步策略；
-- 以长期风险调整后收益为核心（Sharpe Ratio 最大化），将账户回撤控制在 30% 以内，保持胜率 ≥ 60%、盈亏比 ≥ 2:1。
+- 在快节奏的市场中，尽可能的寻找可靠的交易机会，快进快出，交易可以更为激进，目标是尽可能多的盈利
 
 你的权限：
 - 你可以通过工具调用执行任何必要操作：openPosition、closePosition、getMarketPrice、getPositions、getAccountBalance、getOrderBook、getTechnicalIndicators、getFundingRate、calculateRisk、syncPositions 等；
@@ -30,6 +30,8 @@ function generateSystemInstructions(intervalMinutes: number): string {
 你的交易喜好：
 - 你主做短线交易，快进快出，寻找可能的盈利机会
 - 你不要对某一个方向有偏好，做多和做空都是盈利的机会，根据自主的分析策略，选择你的交易方向
+- 你不能固定一个交易方向，需要根据市场趋势去判断正确的交易方向，市场趋势是空的时候就需要做空，市场趋势是多的时候就需要做多
+- 市场变化速度过快，上一轮的决策复盘只能作为参考，不要过度依赖
 
 
 牢记：没有任何预设策略，所有逻辑需要你基于当前市场状态重新推导与验证。`;
@@ -88,7 +90,7 @@ function formatNakedKData(symbol: string, hybridContext: HybridContext): string 
   }
   let out = `裸K缓存配置：${dataset.profileId}\n`;
   for (const [frame, entry] of Object.entries(dataset.frames)) {
-    const candles = entry.candles.slice(-15);
+    const candles = entry.candles;
     if (!candles.length) {
       continue;
     }
@@ -240,7 +242,7 @@ ${formatDecisionMemory(recentDecisions)}
 ${formatFeedback(tradeHistory)}
 
 【任务要求】
-1. 结合裸K、量价结构、ATR 波动率、资金费率与盘口压差，自主判断每个币种的趋势、结构与动能；
+1. 结合裸K、量价结构、ATR 波动率、资金费率与盘口压差，自主判断每个币种的K线形态、趋势、结构与动能；
 2. 针对每个币种输出：多/空观点、入场与退出思路、风险控制（含仓位、杠杆、止盈止损逻辑），必要时说明观望理由；
 3. 若需要执行操作，请使用工具调用（例如 openPosition/closePosition/getMarketPrice/getOrderBook/getPositions/getAccountBalance/calculateRisk 等），并明确参数；
 4. 每次决策后请自我复盘，指出上一轮成功/失败的原因及本轮调整。
