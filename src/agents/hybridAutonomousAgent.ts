@@ -6,6 +6,7 @@ import * as tradingTools from "../tools/trading";
 import { RISK_PARAMS } from "../config/riskParams";
 import { formatChinaTime } from "../utils/timeUtils";
 import type { HybridContext, HybridSymbolSnapshot } from "../services/hybridContext";
+import type { QuantReport } from "../services/quantReport/types";
 
 const logger = createPinoLogger({
   name: "hybrid-autonomous-agent",
@@ -52,6 +53,7 @@ export interface HybridPromptInput {
   positions: any[];
   tradeHistory?: any[];
   recentDecisions?: any[];
+  quantReports?: QuantReport[];
 }
 
 function formatNumber(value: number, digits = 2, fallback = "0"): string {
@@ -106,6 +108,32 @@ function formatNakedKData(symbol: string, hybridContext: HybridContext): string 
     out += "```\n";
   }
   return out;
+}
+
+function truncate(text: string, maxLength = 480): string {
+  if (!text) return "";
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 3)}...`;
+}
+
+function formatQuantReportsSection(reports: QuantReport[] = []): string {
+  if (!reports.length) {
+    return "暂无量化技术报告。\n";
+  }
+  return reports
+    .map((report) => {
+      const lines: string[] = [];
+      lines.push(`### ${report.symbol} · ${report.frame}`);
+      lines.push(
+        `信号：${report.decision.decision}（${report.decision.forecastHorizon}） | 风险回报 ${report.decision.riskRewardRatio}`,
+      );
+      lines.push(`理由：${truncate(report.decision.justification, 280)}`);
+      lines.push(`指标：${truncate(report.indicatorReport, 260)}`);
+      lines.push(`形态：${truncate(report.patternReport, 260)}`);
+      lines.push(`趋势：${truncate(report.trendReport, 260)}`);
+      return lines.join("\n");
+    })
+    .join("\n\n");
 }
 
 function formatSymbolSnapshot(symbol: string, snapshot: HybridSymbolSnapshot, hybridContext: HybridContext): string {
@@ -209,6 +237,7 @@ export function generateHybridPrompt(data: HybridPromptInput): string {
     positions,
     tradeHistory = [],
     recentDecisions = [],
+    quantReports = [],
   } = data;
 
   const currentTime = formatChinaTime();
@@ -233,6 +262,11 @@ ${formatPositions(positions)}
       const snapshot = hybridContext.snapshots[symbol];
       prompt += `${formatSymbolSnapshot(symbol, snapshot, hybridContext)}\n`;
     }
+  }
+
+  if (quantReports.length > 0) {
+    prompt += `\n【量化技术报告】
+${formatQuantReportsSection(quantReports)}\n`;
   }
 
   prompt += `【记忆系统 · 历史决策摘要】

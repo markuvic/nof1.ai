@@ -25,6 +25,7 @@ import { createClient } from "@libsql/client";
 import { createTradingAgent, generateTradingPrompt, getAccountRiskConfig, getTradingStrategy, getStrategyParams } from "../agents/tradingAgent";
 import { createNakedKAgent, generateNakedKPrompt } from "../agents/nakedKAgent";
 import { createHybridAutonomousAgent, generateHybridPrompt } from "../agents/hybridAutonomousAgent";
+import { createQuantSignalAgent } from "../agents/quantSignalAgent";
 import {
   createExchangeClient,
   getActiveExchangeId,
@@ -32,6 +33,8 @@ import {
 } from "../services/exchanges";
 import { collectNakedKData } from "../services/marketData/nakedKCollector";
 import { buildHybridContext, type HybridContext } from "../services/hybridContext";
+import { generateQuantReports } from "../services/quantReport";
+import type { QuantReport } from "../services/quantReport/types";
 import { getChinaTimeISO } from "../utils/timeUtils";
 import { getSystemProtectionConfig } from "../config/systemProtection";
 import { closePositionTool } from "../tools/trading/tradeExecution";
@@ -1464,23 +1467,38 @@ async function executeTradingDecision() {
   const normalizedProfile = agentProfile.replace(/[\s_]+/g, "-");
   const useNakedKAgent = ["naked-k", "nakedk", "naked"].includes(normalizedProfile);
   const useHybridAgent = ["hybrid", "hybrid-agent", "hybrid-autonomous", "hybrid-autonomous-agent", "hybridautonomous", "hybridagent"].includes(normalizedProfile);
+  const useQuantHybridAgent = ["quant-hybrid", "hybrid-quant", "quant", "quant-agent"].includes(normalizedProfile);
+  const runHybridAgent = useHybridAgent || useQuantHybridAgent;
   logger.info(`当前 AI Agent Profile: ${normalizedProfile}`);
+  if (useQuantHybridAgent) {
+    logger.info("量化混合代理模式已启用：将生成技术报告并注入 Hybrid Prompt。");
+  }
 
   let marketData: any = {};
   let nakedKData: any = null;
   let hybridContext: HybridContext | null = null;
   let accountInfo: any = null;
   let positions: any[] = [];
+  let quantReports: QuantReport[] | undefined;
 
   try {
     // 1. 收集市场数据
-    if (useHybridAgent) {
+    if (runHybridAgent) {
       try {
         hybridContext = await buildHybridContext(SYMBOLS);
         const snapshotCount = Object.keys(hybridContext.snapshots || {}).length;
         if (snapshotCount === 0) {
           logger.error("混合 Agent 上下文为空，跳过本次循环");
           return;
+        }
+        if (useQuantHybridAgent) {
+          try {
+            logger.info("量化技术报告生成开始…");
+            quantReports = await generateQuantReports(SYMBOLS);
+            logger.info(`量化技术报告生成完成 (${quantReports.length} 条)。`);
+          } catch (error) {
+            logger.error("量化技术报告生成失败:", error as any);
+          }
         }
       } catch (error) {
         logger.error("构建混合 Agent 数据上下文失败:", error as any);
@@ -1821,7 +1839,7 @@ async function executeTradingDecision() {
     // }
     
     // 5. 数据完整性最终检查
-    const hasMarketDataset = useHybridAgent
+    const hasMarketDataset = runHybridAgent
       ? hybridContext && Object.keys(hybridContext.snapshots || {}).length > 0
       : useNakedKAgent
         ? nakedKData && Object.keys(nakedKData).length > 0
@@ -1871,7 +1889,7 @@ async function executeTradingDecision() {
     }
     
     // 9. 生成提示词并调用 Agent
-    const prompt = useHybridAgent
+    const prompt = runHybridAgent
       ? generateHybridPrompt({
           minutesElapsed,
           iteration: iterationCount,
@@ -1881,6 +1899,7 @@ async function executeTradingDecision() {
           positions,
           tradeHistory,
           recentDecisions,
+          quantReports,
         })
       : useNakedKAgent
         ? generateNakedKPrompt({
@@ -1910,8 +1929,8 @@ async function executeTradingDecision() {
     logger.info(prompt);
     logger.info("=".repeat(80) + "\n");
     
-    const agent = useHybridAgent
-      ? createHybridAutonomousAgent(intervalMinutes)
+    const agent = runHybridAgent
+      ? (useQuantHybridAgent ? createQuantSignalAgent(intervalMinutes) : createHybridAutonomousAgent(intervalMinutes))
       : useNakedKAgent
         ? createNakedKAgent(intervalMinutes)
         : createTradingAgent(intervalMinutes);

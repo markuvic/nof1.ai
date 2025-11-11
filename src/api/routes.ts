@@ -25,6 +25,7 @@ import { createClient } from "@libsql/client";
 import { createExchangeClient } from "../services/exchanges";
 import { normalizeAccountSnapshot } from "../services/accountMetrics";
 import { createPinoLogger } from "@voltagent/logger";
+import { getCachedQuantReports } from "../services/quantReport";
 
 const logger = createPinoLogger({
   name: "api-routes",
@@ -470,6 +471,18 @@ export function createApiRoutes() {
       );
       
       return c.json({ prices });
+    } catch (error: any) {
+      return c.json({ error: error.message }, 500);
+    }
+  });
+
+  /**
+   * 获取量化技术报告
+   */
+  app.get("/api/quant-reports", async (c) => {
+    try {
+      const reports = getCachedQuantReports();
+      return c.json({ reports });
     } catch (error: any) {
       return c.json({ error: error.message }, 500);
     }

@@ -69,6 +69,7 @@
     "docker:prod:down": "docker compose -f docker-compose.prod.yml down"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.54",
     "@ai-sdk/openai": "^2.0.53",
     "@anthropic-ai/sdk": "^0.67.0",
     "@voltagent/cli": "^0.1.10",

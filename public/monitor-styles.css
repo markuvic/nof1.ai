@@ -924,10 +924,89 @@ body {
     color: var(--text-dim);
 }
 
+/* Quant Reports Section */
+.quant-reports-section {
+    grid-column: 1 / 3;
+    grid-row: 5 / 6;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    padding: 1.5rem;
+}
+
+.quant-reports-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+}
+
+.quant-report-card {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+    background-color: var(--bg-tertiary);
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.quant-report-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+}
+
+.quant-report-symbol {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.quant-signal {
+    padding: 0.1rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    border: 1px solid transparent;
+}
+
+.quant-signal.long {
+    color: var(--accent-red);
+    border-color: rgba(248, 113, 113, 0.5);
+}
+
+.quant-signal.short {
+    color: var(--accent-green);
+    border-color: rgba(74, 222, 128, 0.5);
+}
+
+.quant-signal.observe {
+    color: var(--text-dim);
+    border-color: rgba(148, 163, 184, 0.4);
+}
+
+.quant-report-body {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.quant-report-body .label {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+}
+
+.quant-report-body .value {
+    color: var(--text-primary);
+    line-height: 1.4;
+}
+
 /* Trades Section */
 .trades-section {
     grid-column: 1 / 3;
-    grid-row: 5 / 6;
+    grid-row: 6 / 7;
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
     padding: 1.5rem;
@@ -1308,10 +1387,15 @@ body {
         grid-row: 5 / 6;
     }
 
+    .quant-reports-section {
+        grid-column: 1 / 2;
+        grid-row: 6 / 7;
+    }
+
     /* 交易历史 */
     .trades-section {
         grid-column: 1 / 2;
-        grid-row: 6 / 7;
+        grid-row: 7 / 8;
     }
 }
 

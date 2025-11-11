@@ -34,7 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
         await Promise.all([
             loadLogsData(),
             loadTradesData(),
-            loadTradeStats()
+            loadTradeStats(),
+            loadQuantReports()
         ]);
     }, 5 * 60 * 1000); // 5分钟 = 300000毫秒
     
@@ -101,7 +102,8 @@ async function loadAllData() {
         loadPositionsData(),
         loadLogsData(),
         loadTradesData(),
-        loadTradeStats()
+        loadTradeStats(),
+        loadQuantReports()
     ]);
     
     updateLastUpdateTime();
@@ -458,6 +460,66 @@ async function loadTradeStats() {
         
     } catch (error) {
         console.error('加载交易统计失败:', error);
+    }
+}
+
+async function loadQuantReports() {
+    const container = document.getElementById('quantReportsContainer');
+    if (!container) return;
+    try {
+        const response = await fetch('/api/quant-reports');
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        const reports = data.reports || [];
+        if (!reports.length) {
+            container.innerHTML = '<p class="no-data">暂无量化报告</p>';
+            return;
+        }
+        container.innerHTML = reports.map(report => {
+            const decision = (report.decision?.decision || 'observe').toLowerCase();
+            const decisionClass = decision === 'long' ? 'long' : decision === 'short' ? 'short' : 'observe';
+            const horizon = report.decision?.forecastHorizon || '';
+            const rr = report.decision?.riskRewardRatio || '--';
+            const justification = report.decision?.justification || '未提供理由';
+            const indicator = report.indicatorReport || '';
+            const pattern = report.patternReport || '';
+            const trend = report.trendReport || '';
+            return `
+                <div class="quant-report-card">
+                    <div class="quant-report-header">
+                        <div class="quant-report-symbol">${report.symbol} · ${report.frame}</div>
+                        <span class="quant-signal ${decisionClass}">${report.decision?.decision || 'OBSERVE'}</span>
+                    </div>
+                    <div class="quant-report-body">
+                        <div>
+                            <div class="label">预测区间 / 风险回报</div>
+                            <div class="value">${horizon || '未知'} · R/R ${rr}</div>
+                        </div>
+                        <div>
+                            <div class="label">结论</div>
+                            <div class="value">${justification}</div>
+                        </div>
+                        <div>
+                            <div class="label">指标</div>
+                            <div class="value">${indicator}</div>
+                        </div>
+                        <div>
+                            <div class="label">形态</div>
+                            <div class="value">${pattern}</div>
+                        </div>
+                        <div>
+                            <div class="label">趋势</div>
+                            <div class="value">${trend}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('加载量化报告失败:', error);
+        container.innerHTML = '<p class="no-data">量化报告加载失败</p>';
     }
 }
 
