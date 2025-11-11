@@ -49,6 +49,7 @@ class TradingMonitor {
                 this.loadPositionsData(),
                 this.loadTradesData(),
                 this.loadLogsData(),
+                this.loadStatsData(),
                 this.loadTickerPrices()
             ]);
         } catch (error) {
@@ -518,7 +519,8 @@ class TradingMonitor {
         setInterval(async () => {
             await Promise.all([
                 this.loadTradesData(),
-                this.loadLogsData()
+                this.loadLogsData(),
+                this.loadStatsData()
             ]);
         }, 30000);
 
@@ -526,6 +528,114 @@ class TradingMonitor {
         setInterval(async () => {
             await this.updateEquityChart();
         }, 30000);
+    }
+
+    formatSignedNumber(value, digits = 2) {
+        if (!Number.isFinite(value)) return '--';
+        const absValue = Math.abs(value).toFixed(digits);
+        if (value > 0) return `+${absValue}`;
+        if (value < 0) return `-${absValue}`;
+        return absValue;
+    }
+
+    formatPercent(value, digits = 2) {
+        if (!Number.isFinite(value)) return '--';
+        const signed = value > 0 ? '+' : value < 0 ? '-' : '';
+        return `${signed}${Math.abs(value).toFixed(digits)}%`;
+    }
+
+    updateStatValue(elementId, text, tone) {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        element.textContent = text;
+        element.classList.remove('positive', 'negative');
+        if (tone === 'positive') {
+            element.classList.add('positive');
+        } else if (tone === 'negative') {
+            element.classList.add('negative');
+        }
+    }
+
+    async loadStatsData() {
+        try {
+            const response = await fetch('/api/stats');
+            const data = await response.json();
+
+            if (data.error) {
+                throw new Error(data.error);
+            }
+
+            const totalTrades = Number(data.totalTrades ?? 0);
+            const winRate = Number(data.winRate ?? 0);
+            const profitFactor = Number.isFinite(data.profitFactor)
+                ? Number(data.profitFactor)
+                : null;
+            const lossTrades = Number(data.lossTrades ?? 0);
+            const totalPnlValue = Number(data.totalPnl ?? 0);
+            const averageWinValue = Number.isFinite(Number(data.averageWin))
+                ? Number(data.averageWin)
+                : 0;
+            const averageLossValue = Number.isFinite(Number(data.averageLoss))
+                ? Number(data.averageLoss)
+                : 0;
+            const totalFeeValue = Number(data.totalFee ?? 0);
+            const averageFeeValue = Number(data.averageFee ?? 0);
+
+            this.updateStatValue(
+                'stats-total-trades',
+                Number.isFinite(totalTrades) ? totalTrades.toString() : '--'
+            );
+            this.updateStatValue(
+                'stats-win-rate',
+                this.formatPercent(winRate),
+                totalTrades > 0 ? (winRate >= 50 ? 'positive' : 'negative') : undefined
+            );
+
+            let profitFactorText = '--';
+            let profitFactorTone;
+            if (profitFactor !== null && Number.isFinite(profitFactor)) {
+                profitFactorText = profitFactor.toFixed(2);
+                profitFactorTone = profitFactor >= 1 ? 'positive' : profitFactor > 0 ? 'negative' : undefined;
+            } else if (lossTrades === 0 && totalTrades > 0 && totalPnlValue > 0) {
+                profitFactorText = '∞';
+                profitFactorTone = 'positive';
+            }
+            this.updateStatValue('stats-profit-factor', profitFactorText, profitFactorTone);
+
+            this.updateStatValue(
+                'stats-total-pnl',
+                this.formatSignedNumber(totalPnlValue, 2),
+                totalPnlValue > 0 ? 'positive' : totalPnlValue < 0 ? 'negative' : undefined
+            );
+            this.updateStatValue(
+                'stats-average-win',
+                this.formatSignedNumber(averageWinValue, 2),
+                averageWinValue > 0 ? 'positive' : averageWinValue < 0 ? 'negative' : undefined
+            );
+            this.updateStatValue(
+                'stats-average-loss',
+                this.formatSignedNumber(averageLossValue, 2),
+                averageLossValue < 0 ? 'negative' : averageLossValue > 0 ? 'positive' : undefined
+            );
+            const totalFeeText = Number.isFinite(totalFeeValue)
+                ? `-${totalFeeValue.toFixed(2)}`
+                : '--';
+            const averageFeeText = Number.isFinite(averageFeeValue)
+                ? `-${averageFeeValue.toFixed(4)}`
+                : '--';
+            this.updateStatValue(
+                'stats-total-fee',
+                totalFeeText,
+                totalFeeValue > 0 ? 'negative' : undefined
+            );
+            this.updateStatValue(
+                'stats-average-fee',
+                averageFeeText,
+                averageFeeValue > 0 ? 'negative' : undefined
+            );
+        } catch (error) {
+            console.error('加载交易统计失败:', error);
+        }
     }
 
     // 复制ticker内容实现无缝滚动

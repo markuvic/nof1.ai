@@ -108,6 +108,45 @@ const TIMEFRAME_CONFIG = [
   { key: "1h", interval: "1h", limit: 240 },
 ];
 
+function normalizeTimestamp(raw: number): number {
+  if (!Number.isFinite(raw)) {
+    return raw;
+  }
+  // Gate 返回秒级时间戳，Binance 返回毫秒；统一为毫秒便于与 Date.now 对比
+  return raw >= 1_000_000_000_000 ? raw : raw * 1000;
+}
+
+function intervalToMs(interval: string): number {
+  const match = /^(\d+)([smhdw])$/i.exec(interval.trim());
+  if (!match) {
+    return 0;
+  }
+  const value = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  const unitMs =
+    unit === "s"
+      ? 1000
+      : unit === "m"
+        ? 60_000
+        : unit === "h"
+          ? 3_600_000
+          : unit === "d"
+            ? 86_400_000
+            : 604_800_000; // w
+  return value * unitMs;
+}
+
+function filterClosedCandles(
+  candles: NormalizedCandle[],
+  intervalMs: number,
+  now: number,
+): NormalizedCandle[] {
+  if (!candles.length || intervalMs <= 0) {
+    return candles;
+  }
+  return candles.filter((candle) => candle.openTime + intervalMs <= now);
+}
+
 function ensureFinite(value: number, fallback = 0): number {
   if (!Number.isFinite(value)) {
     return fallback;
@@ -123,7 +162,7 @@ function normalizeCandles(raw: any[]): NormalizedCandle[] {
     .map((item) => {
       if (Array.isArray(item)) {
         return {
-          openTime: Number(item[0]),
+          openTime: normalizeTimestamp(Number(item[0])),
           open: Number(item[1]),
           high: Number(item[2]),
           low: Number(item[3]),
@@ -133,7 +172,9 @@ function normalizeCandles(raw: any[]): NormalizedCandle[] {
       }
       if (item && typeof item === "object") {
         return {
-          openTime: Number(item.t ?? item.openTime ?? item[0]),
+          openTime: normalizeTimestamp(
+            Number(item.t ?? item.openTime ?? item[0]),
+          ),
           open: Number(item.o ?? item.open ?? item[1]),
           high: Number(item.h ?? item.high ?? item[2]),
           low: Number(item.l ?? item.low ?? item[3]),
@@ -406,9 +447,14 @@ async function buildSymbolSnapshot(
       ),
     ]);
 
+    const now = Date.now();
     const candlesByKey: Record<string, NormalizedCandle[]> = {};
     TIMEFRAME_CONFIG.forEach((config, idx) => {
-      candlesByKey[config.key] = timeframeCandlesRaw[idx] as NormalizedCandle[];
+      const rawCandles = timeframeCandlesRaw[idx] as NormalizedCandle[];
+      const intervalMs = intervalToMs(config.interval);
+      const closedCandles = filterClosedCandles(rawCandles, intervalMs, now);
+      candlesByKey[config.key] =
+        closedCandles.length > 0 ? closedCandles : rawCandles;
     });
 
     const mainCandles = candlesByKey["5m"] ?? [];

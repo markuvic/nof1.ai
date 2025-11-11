@@ -382,46 +382,62 @@ export function createApiRoutes() {
    */
   app.get("/api/stats", async (c) => {
     try {
-      // 统计总交易次数 - 使用 pnl IS NOT NULL 来确保这是已完成的平仓交易
-      const totalTradesResult = await dbClient.execute(
-        "SELECT COUNT(*) as count FROM trades WHERE type = 'close' AND pnl IS NOT NULL"
+      const startResult = await dbClient.execute(
+        "SELECT timestamp FROM account_history ORDER BY timestamp ASC LIMIT 1",
       );
-      const totalTrades = (totalTradesResult.rows[0] as any).count;
-      
-      // 统计盈利交易
-      const winTradesResult = await dbClient.execute(
-        "SELECT COUNT(*) as count FROM trades WHERE type = 'close' AND pnl IS NOT NULL AND pnl > 0"
-      );
-      const winTrades = (winTradesResult.rows[0] as any).count;
-      
-      // 计算胜率
+      const sinceTimestamp = startResult.rows[0]?.timestamp as string | undefined;
+      const hasSince = typeof sinceTimestamp === "string" && sinceTimestamp.length > 0;
+
+      const aggregates = await dbClient.execute({
+        sql: `
+          SELECT
+            SUM(CASE WHEN type = 'close' AND pnl IS NOT NULL THEN 1 ELSE 0 END) AS closed_trades,
+            SUM(CASE WHEN type = 'close' AND pnl IS NOT NULL AND pnl > 0 THEN 1 ELSE 0 END) AS win_trades,
+            SUM(CASE WHEN type = 'close' AND pnl IS NOT NULL AND pnl < 0 THEN 1 ELSE 0 END) AS loss_trades,
+            SUM(CASE WHEN type = 'close' AND pnl IS NOT NULL THEN pnl ELSE 0 END) AS total_pnl,
+            SUM(CASE WHEN type = 'close' AND pnl IS NOT NULL AND pnl > 0 THEN pnl ELSE 0 END) AS gross_profit,
+            SUM(CASE WHEN type = 'close' AND pnl IS NOT NULL AND pnl < 0 THEN pnl ELSE 0 END) AS gross_loss,
+            AVG(CASE WHEN type = 'close' AND pnl IS NOT NULL AND pnl > 0 THEN pnl END) AS avg_win,
+            AVG(CASE WHEN type = 'close' AND pnl IS NOT NULL AND pnl < 0 THEN pnl END) AS avg_loss,
+            COUNT(*) AS execution_count,
+            SUM(COALESCE(fee, 0)) AS total_fee,
+            AVG(COALESCE(fee, 0)) AS avg_fee
+          FROM trades
+          ${hasSince ? "WHERE timestamp >= ?" : ""}
+        `,
+        args: hasSince ? [sinceTimestamp] : undefined,
+      });
+
+      const row = aggregates.rows[0] ?? {};
+      const totalTrades = Number(row.closed_trades ?? 0) || 0;
+      const winTrades = Number(row.win_trades ?? 0) || 0;
+      const lossTrades = Number(row.loss_trades ?? 0) || 0;
+      const totalPnl = Number(row.total_pnl ?? 0) || 0;
+      const grossProfit = Number(row.gross_profit ?? 0) || 0;
+      const grossLossRaw = Number(row.gross_loss ?? 0) || 0; // 负值
+      const grossLoss = Math.abs(grossLossRaw);
+      const avgWin = Number(row.avg_win ?? 0) || 0;
+      const avgLoss = Number(row.avg_loss ?? 0) || 0; // 负值
+      const totalFee = Number(row.total_fee ?? 0) || 0;
+      const avgFee = Number(row.avg_fee ?? 0) || 0;
+      const executionCount = Number(row.execution_count ?? 0) || 0;
+
       const winRate = totalTrades > 0 ? (winTrades / totalTrades) * 100 : 0;
-      
-      // 计算总盈亏
-      const pnlResult = await dbClient.execute(
-        "SELECT SUM(pnl) as total_pnl FROM trades WHERE type = 'close' AND pnl IS NOT NULL"
-      );
-      const totalPnl = (pnlResult.rows[0] as any).total_pnl || 0;
-      
-      // 获取最大单笔盈利和亏损
-      const maxWinResult = await dbClient.execute(
-        "SELECT MAX(pnl) as max_win FROM trades WHERE type = 'close' AND pnl IS NOT NULL"
-      );
-      const maxWin = (maxWinResult.rows[0] as any).max_win || 0;
-      
-      const maxLossResult = await dbClient.execute(
-        "SELECT MIN(pnl) as max_loss FROM trades WHERE type = 'close' AND pnl IS NOT NULL"
-      );
-      const maxLoss = (maxLossResult.rows[0] as any).max_loss || 0;
-      
+      const profitFactor =
+        grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Number.POSITIVE_INFINITY : 0;
+
       return c.json({
         totalTrades,
         winTrades,
-        lossTrades: totalTrades - winTrades,
+        lossTrades,
         winRate,
+        profitFactor: Number.isFinite(profitFactor) ? profitFactor : null,
         totalPnl,
-        maxWin,
-        maxLoss,
+        averageWin: avgWin,
+        averageLoss: avgLoss,
+        totalFee,
+        averageFee: avgFee,
+        executions: executionCount,
       });
     } catch (error: any) {
       return c.json({ error: error.message }, 500);

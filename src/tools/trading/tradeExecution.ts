@@ -21,7 +21,7 @@
  */
 import { createTool } from "@voltagent/core";
 import { z } from "zod";
-import { createExchangeClient } from "../../services/exchanges";
+import { createExchangeClient, getActiveExchangeId } from "../../services/exchanges";
 import { createClient } from "@libsql/client";
 import { createPinoLogger } from "@voltagent/logger";
 import { getChinaTimeISO } from "../../utils/timeUtils";
@@ -37,6 +37,92 @@ const logger = createPinoLogger({
 const dbClient = createClient({
   url: process.env.DATABASE_URL || "file:./.voltagent/trading.db",
 });
+
+interface OrderPlacementContext {
+  symbol: string;
+  plannedNotional: number;
+  minNotional?: number;
+  effectiveLeverage: number;
+  effectiveAmountUsdt: number;
+  availableBalance: number;
+  maxLeverage: number;
+}
+
+function parseMaybeNumber(value: unknown): number {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : Number.NaN;
+  }
+  if (value === null || value === undefined) {
+    return Number.NaN;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function pickNumericValue(values: unknown[]): number | undefined {
+  for (const candidate of values) {
+    const numeric = parseMaybeNumber(candidate);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+  return undefined;
+}
+
+function parseBinanceApiError(error: any): { code?: number; msg?: string; raw: string } | null {
+  const raw = typeof error?.message === "string" ? error.message : String(error ?? "");
+  const codeMatch = raw.match(/"code":\s*(-?\d+)/);
+  const msgMatch = raw.match(/"msg":"([^"]+)"/);
+  if (!codeMatch && !msgMatch) {
+    return null;
+  }
+  return {
+    code: codeMatch ? Number.parseInt(codeMatch[1], 10) : undefined,
+    msg: msgMatch ? msgMatch[1] : undefined,
+    raw,
+  };
+}
+
+function interpretBinanceOrderError(
+  error: any,
+  context: OrderPlacementContext,
+): { success: false; message: string; error: string } | null {
+  const parsed = parseBinanceApiError(error);
+  if (!parsed?.code) {
+    return null;
+  }
+
+  if (parsed.code === -4164) {
+    const extracted = parsed.msg?.match(/no (?:smaller|less) than ([\d.]+)/i);
+    const requirement = Number.isFinite(context.minNotional ?? Number.NaN)
+      ? context.minNotional!
+      : extracted
+        ? Number.parseFloat(extracted[1])
+        : Number.NaN;
+    const requiredText = Number.isFinite(requirement)
+      ? `${requirement.toFixed(2)} USDT`
+      : "交易所最小名义金额";
+    return {
+      success: false,
+      error: parsed.raw,
+      message: `Binance 拒绝下单：名义价值低于 ${requiredText}（code -4164）。当前计划名义价值 ${context.plannedNotional.toFixed(2)} USDT，保证金 ${context.effectiveAmountUsdt.toFixed(2)} USDT @ ${context.effectiveLeverage}x。请增大开仓金额或适度提高杠杆（≤${context.maxLeverage}x）；若提升杠杆会破坏风险约束，请改用门槛更低的币种或放弃本次交易。`,
+    };
+  }
+
+  if (parsed.code === -2019) {
+    return {
+      success: false,
+      error: parsed.raw,
+      message: `Binance 拒绝下单：保证金不足（code -2019: ${parsed.msg ?? "Margin is insufficient"}）。当前计划占用 ${context.effectiveAmountUsdt.toFixed(2)} USDT（杠杆 ${context.effectiveLeverage}x），但账户可用资金仅 ${context.availableBalance.toFixed(2)} USDT。请降低开仓金额或提高杠杆以降低保证金需求（前提是不超过 ${context.maxLeverage}x 且符合风控），或等待释放更多余额后再尝试。`,
+    };
+  }
+
+  return null;
+}
 
 /**
  * 开仓工具
@@ -57,6 +143,15 @@ export const openPositionTool = createTool({
     const takeProfit = undefined;
     const client = createExchangeClient();
     const contract = `${symbol}_USDT`;
+    const exchangeId = getActiveExchangeId();
+    const exchangeLabel =
+      exchangeId === "binance"
+        ? "Binance"
+        : exchangeId === "gate"
+          ? "Gate.io"
+          : "交易所";
+    let minNotionalValue: number | undefined;
+    let plannedNotional = 0;
     
     try {
       //  参数验证
@@ -330,11 +425,28 @@ export const openPositionTool = createTool({
       await client.setLeverage(contract, adjustedLeverage);
       const effectiveLeverage = Math.max(1, adjustedLeverage);
       const effectiveAmountUsdt = adjustedAmountUsdt;
+      plannedNotional = Math.max(0, effectiveAmountUsdt * effectiveLeverage);
       
       // 获取当前价格和合约信息
       const ticker = await client.getFuturesTicker(contract);
       const currentPrice = Number.parseFloat(ticker.last || "0");
       const contractInfo = await client.getContractInfo(contract);
+      minNotionalValue = pickNumericValue([
+        contractInfo?.minNotional,
+        contractInfo?.orderValueMin,
+        contractInfo?.order_value_min,
+      ]);
+      const minNotionalRequirement =
+        Number.isFinite(minNotionalValue ?? Number.NaN) && (minNotionalValue ?? 0) > 0
+          ? (minNotionalValue as number)
+          : undefined;
+      if (minNotionalRequirement !== undefined && plannedNotional < minNotionalRequirement) {
+        const minMarginNeeded = minNotionalRequirement / effectiveLeverage;
+        return {
+          success: false,
+          message: `${exchangeLabel} 要求 ${symbol} 单笔名义价值至少 ${minNotionalRequirement.toFixed(2)} USDT，当前计划为 ${plannedNotional.toFixed(2)} USDT（保证金 ${effectiveAmountUsdt.toFixed(2)} USDT，杠杆 ${effectiveLeverage}x）。至少需要约 ${minMarginNeeded.toFixed(2)} USDT 保证金或更高杠杆才能满足门槛；若无法在风控范围内提高仓位，请改用更低门槛的标的或放弃该笔交易。`,
+        };
+      }
       
       // Gate.io 永续合约的保证金计算
       // 注意：Gate.io 使用"张数"作为单位，每张合约代表一定数量的币
@@ -375,11 +487,30 @@ export const openPositionTool = createTool({
       logger.info(`开仓 ${symbol} ${side === "long" ? "做多" : "做空"} ${Math.abs(size)}张 (杠杆${effectiveLeverage}x)`);
       
       //  市价单开仓（不设置止盈止损）
-      const order = await client.placeOrder({
-        contract,
-        size,
-        price: 0,  // 市价单必须传 price: 0
-      });
+      let order;
+      try {
+        order = await client.placeOrder({
+          contract,
+          size,
+          price: 0,  // 市价单必须传 price: 0
+        });
+      } catch (error: any) {
+        if (exchangeId === "binance") {
+          const interpreted = interpretBinanceOrderError(error, {
+            symbol,
+            plannedNotional,
+            minNotional: minNotionalValue,
+            effectiveLeverage,
+            effectiveAmountUsdt,
+            availableBalance,
+            maxLeverage: RISK_PARAMS.MAX_LEVERAGE,
+          });
+          if (interpreted) {
+            return interpreted;
+          }
+        }
+        throw error;
+      }
       
       //  等待并验证订单状态（带重试）
       // 增加等待时间，确保 Gate.io API 更新持仓信息
