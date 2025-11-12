@@ -1,6 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText } from "ai";
-import type { QuantReportContext } from "./types";
+import { generateText, generateObject } from "ai";
+import { z } from "zod";
+import type { QuantReportContext, QuantDecision } from "./types";
 import { QUANT_AGENT_CONFIG } from "../../config/quantAgentConfig";
 
 const openai = createOpenAI({
@@ -81,7 +82,14 @@ export interface DecisionInput {
   trendReport: string;
 }
 
-export async function runDecisionAgent(input: DecisionInput) {
+const decisionSchema = z.object({
+  forecast_horizon: z.string().max(64),
+  decision: z.enum(["LONG", "SHORT", "OBSERVE"]),
+  justification: z.string().max(160),
+  risk_reward_ratio: z.string(),
+});
+
+export async function runDecisionAgent(input: DecisionInput): Promise<QuantDecision> {
   const prompt = `你是一名负责 ${input.symbol} 当前 ${input.frame} K 线的高频量化交易分析师。你的任务是立刻下达执行指令：只能是 LONG 或 SHORT，若信息不足可输出 OBSERVE 并说明原因。
 
 请综合以下报告的力度、方向一致性与信号时序做出决策：
@@ -102,13 +110,22 @@ ${input.trendReport}
   "justification": "核心结论",
   "risk_reward_ratio": "1.2~1.8 范围的小数"
 }
-请用 \`\`\`json ...\`\`\` 包裹最终输出，勿添加额外解释。`;
+请严格遵守以下要求：仅输出一个 JSON 对象，字段为 forecast_horizon、decision、justification、risk_reward_ratio。justification 不得超过 120 个字符，禁止换行或额外解释。`;
 
-  const { text } = await generateText({
+  const result = await generateObject({
     model: openai.chat(decisionModel),
     prompt,
-    maxOutputTokens: 700,
-    temperature: 0.3,
+    maxOutputTokens: 400,
+    temperature: 0.2,
+    schema: decisionSchema,
   });
-  return text?.trim() || "";
+
+  const object = result.object;
+  return {
+    forecastHorizon: object.forecast_horizon,
+    decision: object.decision,
+    justification: object.justification,
+    riskRewardRatio: object.risk_reward_ratio,
+    rawText: result.text || JSON.stringify(object),
+  };
 }

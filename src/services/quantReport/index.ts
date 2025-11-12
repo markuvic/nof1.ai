@@ -9,46 +9,15 @@ import {
 import type { QuantReport, QuantDecision } from "./types";
 import type { QuantReportContext } from "./types";
 import { buildIndicatorNarrative } from "./indicatorMath";
+import { createPinoLogger } from "@voltagent/logger";
+
+const logger = createPinoLogger({
+  name: "quant-report",
+  level: (process.env.LOG_LEVEL as any) || "info",
+});
 
 const reportCache = new Map<string, { timestamp: number; report: QuantReport }>();
 const KLINE_CACHE_BASE = ".voltagent/kline-cache";
-
-function extractJsonPayload(text: string): string | null {
-  if (!text) return null;
-  const trimmed = text.trim();
-  const fenceMatch = trimmed.match(/```(?:json)?([\s\S]*?)```/i);
-  if (fenceMatch && fenceMatch[1]) {
-    return fenceMatch[1].trim();
-  }
-  const firstBrace = trimmed.indexOf("{");
-  const lastBrace = trimmed.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    return trimmed.slice(firstBrace, lastBrace + 1);
-  }
-  return null;
-}
-
-function parseDecision(decisionText: string): QuantDecision {
-  const payload = extractJsonPayload(decisionText) ?? decisionText;
-  try {
-    const parsed = JSON.parse(payload);
-    return {
-      forecastHorizon: parsed.forecast_horizon || "未知",
-      decision: parsed.decision || "OBSERVE",
-      justification: parsed.justification || "无明确结论",
-      riskRewardRatio: parsed.risk_reward_ratio || "1.3",
-      rawText: decisionText,
-    };
-  } catch (error) {
-    return {
-      forecastHorizon: "未知",
-      decision: "OBSERVE",
-      justification: "JSON 解析失败，原始输出：" + decisionText,
-      riskRewardRatio: "1.3",
-      rawText: decisionText,
-    };
-  }
-}
 
 function summarizeError(reason: unknown): string {
   if (!reason) return "未知错误";
@@ -103,14 +72,25 @@ export async function generateQuantReport(symbol: string): Promise<QuantReport> 
       ? trendResult.value
       : `趋势代理失败：${summarizeError(trendResult.reason)}`;
 
-  const decisionRaw = await runDecisionAgent({
-    symbol,
-    frame: primaryFrame.frame,
-    indicatorReport,
-    patternReport,
-    trendReport,
-  });
-  const decision = parseDecision(decisionRaw);
+  let decision: QuantDecision;
+  try {
+    decision = await runDecisionAgent({
+      symbol,
+      frame: primaryFrame.frame,
+      indicatorReport,
+      patternReport,
+      trendReport,
+    });
+  } catch (error) {
+    logger.warn(`决策代理执行失败: ${symbol}`, error as any);
+    decision = {
+      forecastHorizon: "未知",
+      decision: "OBSERVE",
+      justification: "决策代理失败，建议人工确认。",
+      riskRewardRatio: "1.3",
+      rawText: "",
+    };
+  }
 
   const report: QuantReport = {
     symbol,

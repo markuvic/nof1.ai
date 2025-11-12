@@ -19,23 +19,26 @@ function generateSystemInstructions(intervalMinutes: number): string {
   return `你是一位拥有丰富交易经验的混合自主架构（Hybrid Autonomous）加密交易员，擅长进行中短期永续合约交易，具备独立学习、策略构建与自我迭代的能力。
 
 你的使命：
-- 持续吸收最新的裸K、量价、仓位与账户反馈，自主总结规律；
+- 持续吸收最新的裸K、量价、仓位与账户反馈，自主总结规律,自主决定交易策略；
 - 在 ${intervalMinutes} 分钟轮询节奏中快速适应市场结构，形成下一步策略；
-- 在快节奏的市场中，尽可能的寻找可靠的交易机会，快进快出，交易可以更为激进，目标是尽可能多的盈利
+- 在快节奏的市场中，尽可能的寻找可靠的交易机会，目标是尽可能多的盈利
 
 你的权限：
 - 你可以通过工具调用执行任何必要操作：openPosition、closePosition、getMarketPrice、getPositions、getAccountBalance、getOrderBook、getTechnicalIndicators、getFundingRate、calculateRisk、syncPositions 等；
 - 你可以请求任意市场数据工具来验证假设，或在没有把握时保持观望。
-- 永续合约杠杆上限 ${systemMaxLeverage}x
+- 永续合约杠杆固定使用 ${systemMaxLeverage} 倍
 
 你的交易喜好：
 - 你主做短线交易，快进快出，寻找可能的盈利机会
-- 你不要对某一个方向有偏好，做多和做空都是盈利的机会，根据自主的分析策略，选择你的交易方向
-- 你不能固定一个交易方向，需要根据市场趋势去判断正确的交易方向，市场趋势是空的时候就需要做空，市场趋势是多的时候就需要做多
+- 你不会对某一个交易方向有偏好，做多和做空都是盈利的机会，根据自主的分析策略，选择你的交易方向
+- 你不会固定一个交易方向，需要根据市场趋势去判断正确的交易方向，市场趋势是空的时候就需要做空，市场趋势是多的时候就需要做多
 - 市场变化速度过快，上一轮的决策复盘只能作为参考，不要过度依赖
 
 
-牢记：没有任何预设策略，所有逻辑需要你基于当前市场状态重新推导与验证。`;
+牢记：
+- 没有任何预设策略，所有逻辑需要你基于当前市场状态重新推导与验证。
+- 只有在机会足够可靠，盈亏比足够可观的时候才选择进行交易，不要为了交易而交易
+`;
 }
 
 // 你的硬性约束：
@@ -110,12 +113,6 @@ function formatNakedKData(symbol: string, hybridContext: HybridContext): string 
   return out;
 }
 
-function truncate(text: string, maxLength = 480): string {
-  if (!text) return "";
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength - 3)}...`;
-}
-
 function formatQuantReportsSection(reports: QuantReport[] = []): string {
   if (!reports.length) {
     return "暂无量化技术报告。\n";
@@ -127,10 +124,10 @@ function formatQuantReportsSection(reports: QuantReport[] = []): string {
       lines.push(
         `信号：${report.decision.decision}（${report.decision.forecastHorizon}） | 风险回报 ${report.decision.riskRewardRatio}`,
       );
-      lines.push(`理由：${truncate(report.decision.justification, 280)}`);
-      lines.push(`指标：${truncate(report.indicatorReport, 260)}`);
-      lines.push(`形态：${truncate(report.patternReport, 260)}`);
-      lines.push(`趋势：${truncate(report.trendReport, 260)}`);
+      lines.push(`理由：${report.decision.justification}`);
+      lines.push(`指标：${report.indicatorReport}`);
+      lines.push(`形态：${report.patternReport}`);
+      lines.push(`趋势：${report.trendReport}`);
       return lines.join("\n");
     })
     .join("\n\n");
@@ -138,7 +135,11 @@ function formatQuantReportsSection(reports: QuantReport[] = []): string {
 
 function formatSymbolSnapshot(symbol: string, snapshot: HybridSymbolSnapshot, hybridContext: HybridContext): string {
   const lines: string[] = [];
-  lines.push(`### ${symbol}`);
+  lines.push(formatMultiTimeframe(snapshot));
+  lines.push(`### ${symbol} -start- ###`);
+  lines.push("\n裸K 数据：");
+  lines.push(formatNakedKData(symbol, hybridContext));
+  lines.push("\n多时间框架指标：");
   lines.push(`价格 ${formatNumber(snapshot.price, 2)} USDT（24h ${formatNumber(snapshot.change24h, 2)}%）`);
   lines.push(`资金费率 ${formatNumber(snapshot.fundingRate, 6)} (${snapshot.fundingDirection === "positive" ? "多头付费" : snapshot.fundingDirection === "negative" ? "空头付费" : "中性"})`);
   lines.push(`成交量 当前 ${formatNumber(snapshot.volume.current, 1)} vs 平滑 ${formatNumber(snapshot.volume.average, 1)}`);
@@ -156,10 +157,7 @@ function formatSymbolSnapshot(symbol: string, snapshot: HybridSymbolSnapshot, hy
   lines.push(
     `布林带：上轨 ${formatNumber(snapshot.bollinger.upper, 2)}, 下轨 ${formatNumber(snapshot.bollinger.lower, 2)}, 带宽 ${formatNumber(snapshot.bollinger.bandwidthPercent, 2)}%`,
   );
-  lines.push("\n多时间框架指标：");
-  lines.push(formatMultiTimeframe(snapshot));
-  lines.push("\n裸K 数据：");
-  lines.push(formatNakedKData(symbol, hybridContext));
+  lines.push(`### ${symbol} -end- ###`);
   return lines.join("\n") + "\n";
 }
 
@@ -244,8 +242,6 @@ export function generateHybridPrompt(data: HybridPromptInput): string {
   let prompt = `【Hybrid 交易周期 #${iteration}】${currentTime}
 已运行 ${minutesElapsed} 分钟，循环周期 ${intervalMinutes} 分钟
 
-系统提示：系统级止盈/止损/移动止盈持续运行，你的决策需要考虑其可能触发点。
-
 【账户状态】
 ${formatAccountSection(accountInfo)}
 
@@ -276,10 +272,28 @@ ${formatDecisionMemory(recentDecisions)}
 ${formatFeedback(tradeHistory)}
 
 【任务要求】
-1. 结合裸K、量价结构、ATR 波动率、资金费率与盘口压差，自主判断每个币种的K线形态、趋势、结构与动能；
-2. 针对每个币种输出：多/空观点、入场与退出思路、风险控制（含仓位、杠杆、止盈止损逻辑），必要时说明观望理由；
-3. 若需要执行操作，请使用工具调用（例如 openPosition/closePosition/getMarketPrice/getOrderBook/getPositions/getAccountBalance/calculateRisk 等），并明确参数；
-4. 每次决策后请自我复盘，指出上一轮成功/失败的原因及本轮调整。
+1: 参考以下经典 K 线形态：
+  1. 反头肩底：由三个低点组成，中间低点最低且整体对称，常预示即将上行。
+  2. 双底：两个接近的低点，中间伴随反弹，整体呈 “W” 形。
+  3. 圆弧底：价格缓慢下行后再缓慢回升，形如 “U” 字。
+  4. 隐形底：水平整理后突然向上突破。
+  5. 下降楔形：价格下行区间逐步收敛，通常向上突破。
+  6. 上升楔形：价格缓慢上行但区间收窄，常向下跌破。
+  7. 上升三角形：支撑线抬升、上方阻力水平，突破多向上。
+  8. 下降三角形：阻力线下压、下方支撑水平，常向下跌破。
+  9. 多头旗形：急涨后短暂回撤整理，再继续向上。
+  10. 空头旗形：急跌后短暂反弹整理，再继续向下。
+  11. 矩形：在水平支撑与阻力间来回震荡。
+  12. 孤岛反转：前后两个跳空朝向相反，形成孤立价格岛。
+  13. V 型反转：急跌后迅速反弹，或相反。
+  14. 圆弧顶 / 圆弧底：价格缓慢筑顶或筑底，呈弧形。
+  15. 扩散三角形：高低点逐渐发散，波动加剧。
+  16. 对称三角形：高低点同时收敛至尖端，后续通常迎来突破。
+结合裸K数据，识别 ${intervalMinutes} 分钟K线形态，判断是否存在匹配的已知形态，。
+2: 结合K线形态、量价结构、ATR 波动率、资金费率与盘口压差，自主判断每个币种的、趋势、结构与动能,分析每个币种的交易机会；
+3: 针对每个币种输出：多/空观点、入场与退出思路、风险控制（含仓位、杠杆、止盈止损逻辑），必要时说明观望理由；
+4: 若需要执行操作，请使用工具调用（例如 openPosition/closePosition/getMarketPrice/getOrderBook/getPositions/getAccountBalance/calculateRisk 等），并明确参数；
+5: 每次决策后请自我复盘，指出上一轮成功/失败的原因及本轮调整。
 
 请保持输出结构化，先列宏观观察，再逐币种分析，最后给出执行计划与需要调用的工具。`;
 
