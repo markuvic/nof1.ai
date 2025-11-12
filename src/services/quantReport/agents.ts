@@ -17,7 +17,24 @@ export async function runPatternAgent(ctx: QuantReportContext): Promise<string> 
     {
       role: "system" as const,
       content:
-        "你是一名负责识别经典高频交易形态的图表分析助理。请结合常见形态（头肩、双底、楔形、旗形、三角形、V 反转等）给出明确判断，仅当形态清晰且已接近完成时才做交易结论。",
+        `你是一名负责识别经典高频交易形态的图表分析助理。请参考以下经典 K 线形态：
+        1. 反头肩底：由三个低点组成，中间低点最低且整体对称，常预示即将上行。
+        2. 双底：两个接近的低点，中间伴随反弹，整体呈 “W” 形。
+        3. 圆弧底：价格缓慢下行后再缓慢回升，形如 “U” 字。
+        4. 隐形底：水平整理后突然向上突破。
+        5. 下降楔形：价格下行区间逐步收敛，通常向上突破。
+        6. 上升楔形：价格缓慢上行但区间收窄，常向下跌破。
+        7. 上升三角形：支撑线抬升、上方阻力水平，突破多向上。
+        8. 下降三角形：阻力线下压、下方支撑水平，常向下跌破。
+        9. 多头旗形：急涨后短暂回撤整理，再继续向上。
+        10. 空头旗形：急跌后短暂反弹整理，再继续向下。
+        11. 矩形：在水平支撑与阻力间来回震荡。
+        12. 孤岛反转：前后两个跳空朝向相反，形成孤立价格岛。
+        13. V 型反转：急跌后迅速反弹，或相反。
+        14. 圆弧顶 / 圆弧底：价格缓慢筑顶或筑底，呈弧形。
+        15. 扩散三角形：高低点逐渐发散，波动加剧。
+        16. 对称三角形：高低点同时收敛至尖端，后续通常迎来突破。
+        给出明确判断，仅当形态清晰且已接近完成时才做交易结论。`
     },
     {
       role: "user" as const,
@@ -37,7 +54,7 @@ export async function runPatternAgent(ctx: QuantReportContext): Promise<string> 
   const { text } = await generateText({
     model: openai.chat(visionModel),
     messages,
-    maxOutputTokens: 600,
+    maxOutputTokens: 2048,
     temperature: 0.4,
   });
   return text?.trim() || "未能识别出有效形态。";
@@ -68,7 +85,7 @@ export async function runTrendAgent(ctx: QuantReportContext): Promise<string> {
   const { text } = await generateText({
     model: openai.chat(visionModel),
     messages,
-    maxOutputTokens: 600,
+    maxOutputTokens: 2048,
     temperature: 0.4,
   });
   return text?.trim() || "未能识别出明确趋势。";
@@ -103,19 +120,12 @@ ${input.patternReport}
 【趋势报告】
 ${input.trendReport}
 
-输出 JSON：
-{
-  "forecast_horizon": "预测未来几根 K 线",
-  "decision": "LONG/SHORT/OBSERVE",
-  "justification": "核心结论",
-  "risk_reward_ratio": "1.2~1.8 范围的小数"
-}
-请严格遵守以下要求：仅输出一个 JSON 对象，字段为 forecast_horizon、decision、justification、risk_reward_ratio。justification 不得超过 120 个字符，禁止换行或额外解释。`;
+`;
 
   const result = await generateObject({
     model: openai.chat(decisionModel),
     prompt,
-    maxOutputTokens: 400,
+    maxOutputTokens: 4096,
     temperature: 0.2,
     schema: decisionSchema,
   });

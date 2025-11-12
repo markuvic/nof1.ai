@@ -73,25 +73,31 @@ export async function generateQuantReport(symbol: string): Promise<QuantReport> 
       : `趋势代理失败：${summarizeError(trendResult.reason)}`;
 
   let decision: QuantDecision;
-  try {
-    decision = await runDecisionAgent({
-      symbol,
-      frame: primaryFrame.frame,
-      indicatorReport,
-      patternReport,
-      trendReport,
-    });
-  } catch (error) {
-    logger.warn(`决策代理执行失败: ${symbol}`, error as any);
-    decision = {
-      forecastHorizon: "未知",
-      decision: "OBSERVE",
-      justification: "决策代理失败，建议人工确认。",
-      riskRewardRatio: "1.3",
-      rawText: "",
-    };
-  }
-
+  // try {
+  //   decision = await runDecisionAgent({
+  //     symbol,
+  //     frame: primaryFrame.frame,
+  //     indicatorReport,
+  //     patternReport,
+  //     trendReport,
+  //   });
+  // } catch (error) {
+  //   logger.warn(`决策代理执行失败: ${symbol}`, error as any);
+  //   decision = {
+  //     forecastHorizon: "未知",
+  //     decision: "OBSERVE",
+  //     justification: "决策代理失败，建议人工确认。",
+  //     riskRewardRatio: "1.3",
+  //     rawText: "",
+  //   };
+  // }
+  decision = {
+    forecastHorizon: " ",
+    decision: " ",
+    justification: " ",
+    riskRewardRatio: " ",
+    rawText: "",
+  };
   const report: QuantReport = {
     symbol,
     frame: primaryFrame.frame,

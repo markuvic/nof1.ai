@@ -10,18 +10,6 @@ export interface KlineProfileDefinition {
   retentionBuffer?: number;
 }
 
-// scalper: {
-//   id: "scalper",
-//   description: "高频短线：1m/5m/15m/1h，侧重敏捷触发",
-//   intervals: [
-//     { frame: "1m", limit: 120 },
-//     { frame: "5m", limit: 80 },
-//     { frame: "15m", limit: 96 },
-//     { frame: "1h", limit: 36 },
-//   ],
-//   retentionBuffer: 24,
-// }
-
 const profiles: Record<KlineProfileId, KlineProfileDefinition> = {
   baseline: {
     id: "baseline",
@@ -36,9 +24,12 @@ const profiles: Record<KlineProfileId, KlineProfileDefinition> = {
   },
   scalper: {
     id: "scalper",
-    description: "高频短线：1m/5m/15m/1h，侧重敏捷触发",
+    description: "高频短线：1m/3m/15m/1h，侧重敏捷触发",
     intervals: [
-      { frame: "15m", limit: 96 },
+      { frame: "1m", limit: 120 },
+      { frame: "3m", limit: 80 },
+      { frame: "15m", limit: 48 },
+      { frame: "1h", limit: 36 },
     ],
     retentionBuffer: 24,
   },

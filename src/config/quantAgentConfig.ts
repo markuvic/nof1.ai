@@ -5,6 +5,12 @@ export interface QuantAgentInterval {
   limit: number;
 }
 
+export interface QuantModelConfig {
+  indicatorModel: string;
+  visionModel: string;
+  decisionModel: string;
+}
+
 export interface QuantAgentConfig {
   enabledSymbols: string[];
   intervals: QuantAgentInterval[];
@@ -13,10 +19,7 @@ export interface QuantAgentConfig {
   imageHeight: number;
   cacheTtlMs: number;
   maxConcurrentSymbols: number;
-  models: {
-    visionModel: string;
-    decisionModel: string;
-  };
+  models: QuantModelConfig;
 }
 
 function getEnvNumber(name: string, fallback: number): number {
@@ -31,9 +34,7 @@ function getEnvString(name: string, fallback: string): string {
 }
 
 const defaultIntervals: QuantAgentInterval[] = [
-  { frame: "15m", limit: 64 },
-  { frame: "1h", limit: 72 },
-  { frame: "4h", limit: 48 },
+  { frame: "15m", limit: 96 }
 ];
 
 export const QUANT_AGENT_CONFIG: QuantAgentConfig = {
@@ -45,6 +46,7 @@ export const QUANT_AGENT_CONFIG: QuantAgentConfig = {
   cacheTtlMs: getEnvNumber("QUANT_REPORT_CACHE_TTL_MS", 5 * 60 * 1000),
   maxConcurrentSymbols: getEnvNumber("QUANT_REPORT_MAX_CONCURRENCY", 2),
   models: {
+    indicatorModel: getEnvString("QUANT_INDICATOR_MODEL", "gpt-4o-mini"),
     visionModel: getEnvString("QUANT_VISION_MODEL", "gpt-4o-mini"),
     decisionModel: getEnvString("QUANT_DECISION_MODEL", "gpt-4o-mini"),
   },
