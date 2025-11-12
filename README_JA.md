@@ -153,7 +153,7 @@ open-nof1.ai は、大規模言語モデルの知能と量的取引実践を深�
 ```bash
 # リポジトリをクローン
 git clone <repository-url>
-cd open-nof1.ai
+cd nof1.ai
 
 # 依存関係をインストール
 npm install
@@ -209,7 +209,7 @@ ACCOUNT_RECORD_INTERVAL_MINUTES=1            # 口座記録間隔
 - OpenRouter: https://openrouter.ai/keys
 - OpenAI: https://platform.openai.com/api-keys
 - DeepSeek: https://platform.deepseek.com/api_keys
-- Gate.io テストネット: https://www.gate.io/testnet
+- Gate.io テストネット: https://testnet.gate.com
 - Gate.io 本番ネット: https://www.gatesite.org/signup/NOFIAIOO?ref_type=103
 
 > **ヒント**: 上記の招待リンクまたは招待コード `NOFIAIOO` を使用して Gate.io アカウントを登録すると、取引手数料のリベートを受けられます。
@@ -230,6 +230,8 @@ npm run dev
 npm run trading:start
 ```
 
+> **起動失敗？** 先物アカウントが0では取引できません。現物アカウントから資金を振替してください（テストネットも同様）。
+
 ### Web ダッシュボードへのアクセス
 
 ブラウザで `http://localhost:3100` にアクセスします
@@ -237,7 +239,7 @@ npm run trading:start
 ## プロジェクト構造
 
 ```
-open-nof1.ai/
+nof1.ai/
 ├── src/
 │   ├── index.ts                      # アプリケーションエントリーポイント
 │   ├── agents/
@@ -815,7 +817,7 @@ Gate.io アカウントをお持ちでない場合、以下の招待方式での
 - [OpenAI API リファレンス](https://platform.openai.com/docs/api-reference)
 - [DeepSeek API ドキュメント](https://platform.deepseek.com/api-docs/)
 - [Gate.io API リファレンス](https://www.gate.io/docs/developers/apiv4/)
-- [Gate.io テストネット](https://www.gate.io/testnet)
+- [Gate.io テストネット](https://testnet.gate.com)
 
 ## リスク免責事項
 

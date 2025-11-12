@@ -153,7 +153,7 @@ The system follows a **minimal human intervention** design philosophy, abandonin
 ```bash
 # Clone repository
 git clone <repository-url>
-cd open-nof1.ai
+cd nof1.ai
 
 # Install dependencies
 npm install
@@ -209,7 +209,7 @@ ACCOUNT_RECORD_INTERVAL_MINUTES=1             # Account record interval
 - OpenRouter: https://openrouter.ai/keys
 - OpenAI: https://platform.openai.com/api-keys
 - DeepSeek: https://platform.deepseek.com/api_keys
-- Gate.io Testnet: https://www.gate.io/testnet
+- Gate.io Testnet: https://testnet.gate.com
 - Gate.io Mainnet: https://www.gatesite.org/signup/NOFIAIOO?ref_type=103
 
 > **Tip**: Register a Gate.io account using the above referral link or invitation code `NOFIAIOO` to receive commission rebates on your trades.
@@ -230,6 +230,8 @@ npm run dev
 npm run trading:start
 ```
 
+> **Startup Failed?** Futures account with zero balance cannot trade. Please transfer funds from Spot account (testnet included).
+
 ### Access Web Dashboard
 
 Navigate to `http://localhost:3100` in your browser.
@@ -237,7 +239,7 @@ Navigate to `http://localhost:3100` in your browser.
 ## Project Structure
 
 ```
-open-nof1.ai/
+nof1.ai/
 ├── src/
 │   ├── index.ts                      # Application entry point
 │   ├── agents/
@@ -814,7 +816,7 @@ If you don't have a Gate.io account yet, we recommend registering through this r
 - [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
 - [DeepSeek API Documentation](https://platform.deepseek.com/api-docs/)
 - [Gate.io API Reference](https://www.gate.io/docs/developers/apiv4/)
-- [Gate.io Testnet](https://www.gate.io/testnet)
+- [Gate.io Testnet](https://testnet.gate.com)
 
 ## Risk Disclaimer
 
