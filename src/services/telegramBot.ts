@@ -487,3 +487,21 @@ export async function sendTradeNotification(payload: TradeNotification) {
     await broadcastMessage(text);
   }
 }
+
+interface AlertNotificationPayload {
+  title?: string;
+  lines: string[];
+  emoji?: string;
+}
+
+export async function sendAlertNotification(payload: AlertNotificationPayload) {
+  if (!botReady) return;
+  const emoji = payload.emoji ?? "⚡";
+  const title = payload.title ?? "系统通知";
+  const header = `<b>${escapeHtml(`${emoji} ${title}`)}</b>`;
+  const body = payload.lines
+    .map((line) => escapeHtml(line))
+    .join("\n");
+  const text = [header, body].filter(Boolean).join("\n");
+  await broadcastMessage(text);
+}

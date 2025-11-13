@@ -3,6 +3,7 @@ export interface SystemProtectionConfig {
   takeProfitEnabled: boolean;
   stopLossEnabled: boolean;
   trailingEnabled: boolean;
+  timeoutProfitEnabled: boolean;
   takeProfitPercent: number;
   takeProfitClosePercent: number;
   takeProfitMaxTriggers: number;
@@ -14,6 +15,11 @@ export interface SystemProtectionConfig {
     closePercent: number;
   }>;
   checkIntervalMs: number;
+  timeoutMinHoldMinutes: number;
+  timeoutDrawdownPercent: number;
+  timeoutClosePercent: number;
+  timeoutMinPeakPercent: number;
+  timeoutMinCloseContracts: number;
 }
 
 function parsePercent(value: string | undefined, fallback: number): number {
@@ -83,6 +89,29 @@ export function getSystemProtectionConfig(): SystemProtectionConfig {
     process.env.SYSTEM_TRAILING_ENABLED === "true" ||
     trailingTiers.length > 0;
 
+  const timeoutProfitEnabled =
+    process.env.SYSTEM_TIMEOUT_PROFIT_ENABLED === "true";
+  const timeoutMinHoldMinutes = Math.max(
+    1,
+    Number.parseInt(process.env.SYSTEM_TIMEOUT_MINUTES || "60", 10),
+  );
+  const timeoutDrawdownPercent = clampPercent(
+    parsePercent(process.env.SYSTEM_TIMEOUT_DRAWDOWN_PERCENT, 50),
+  );
+  const timeoutClosePercent = clampPercent(
+    parsePercent(process.env.SYSTEM_TIMEOUT_CLOSE_PERCENT, 50),
+  );
+  const timeoutMinPeakPercent = clampPercent(
+    parsePercent(process.env.SYSTEM_TIMEOUT_MIN_PEAK_PERCENT, 3),
+  );
+  const timeoutMinCloseContracts = Math.max(
+    0,
+    Number.parseInt(
+      process.env.SYSTEM_TIMEOUT_MIN_CLOSE_CONTRACTS || "0",
+      10,
+    ),
+  );
+
   const takeProfitPercent = parsePercent(
     process.env.SYSTEM_TAKE_PROFIT_PERCENT,
     0,
@@ -106,10 +135,12 @@ export function getSystemProtectionConfig(): SystemProtectionConfig {
     ) * 1000;
 
   return {
-    enabled: takeProfitEnabled || stopLossEnabled || trailingEnabled,
+    enabled:
+      takeProfitEnabled || stopLossEnabled || trailingEnabled || timeoutProfitEnabled,
     takeProfitEnabled,
     stopLossEnabled,
     trailingEnabled,
+    timeoutProfitEnabled,
     takeProfitPercent,
     takeProfitClosePercent,
     takeProfitMaxTriggers: Math.max(
@@ -120,5 +151,10 @@ export function getSystemProtectionConfig(): SystemProtectionConfig {
     stopLossClosePercent,
     trailingTiers,
     checkIntervalMs,
+    timeoutMinHoldMinutes,
+    timeoutDrawdownPercent,
+    timeoutClosePercent,
+    timeoutMinPeakPercent,
+    timeoutMinCloseContracts,
   };
 }

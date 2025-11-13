@@ -37,9 +37,14 @@ import { generateQuantReports } from "../services/quantReport";
 import type { QuantReport } from "../services/quantReport/types";
 import { getChinaTimeISO } from "../utils/timeUtils";
 import { getSystemProtectionConfig } from "../config/systemProtection";
+import { getMarketPulseConfig } from "../config/marketPulse";
 import { closePositionTool } from "../tools/trading/tradeExecution";
 import { RISK_PARAMS } from "../config/riskParams";
 import { getQuantoMultiplier } from "../utils/contractUtils";
+import { startMarketPulseWatcher } from "../services/marketPulse";
+import type { MarketPulseEvent } from "../types/marketPulse";
+import { describeMarketPulseEvent } from "../utils/marketPulseUtils";
+import { notifyMarketPulseTriggered } from "../services/notifier";
 
 const logger = createPinoLogger({
   name: "trading-loop",
@@ -53,6 +58,7 @@ const dbClient = createClient({
 // 支持的币种 - 从配置中读取
 const SYMBOLS = [...RISK_PARAMS.TRADING_SYMBOLS] as string[];
 const systemProtectionConfig = getSystemProtectionConfig();
+const marketPulseConfig = getMarketPulseConfig();
 
 // 交易开始时间
 let tradingStartTime = new Date();
@@ -60,6 +66,21 @@ let iterationCount = 0;
 
 let systemProtectionTimer: NodeJS.Timeout | null = null;
 let systemProtectionExecuting = false;
+let tradingDecisionRunning = false;
+let lastScheduledExecutionAt = 0;
+let nextScheduledExecutionAt = 0;
+
+interface TradingDecisionOptions {
+  trigger?: "scheduled" | "market-pulse";
+  marketPulseEvent?: MarketPulseEvent | null;
+}
+
+function getTimeUntilNextScheduledRunMs(): number {
+  if (!nextScheduledExecutionAt) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return nextScheduledExecutionAt - Date.now();
+}
 
 async function ensurePositionsColumns() {
   const columns = [
@@ -944,7 +965,12 @@ async function performSystemProtection() {
     systemProtectionConfig.takeProfitEnabled && takeProfitPercent > 0;
   const slActive =
     systemProtectionConfig.stopLossEnabled && stopLossPercent > 0;
-  if (!tpActive && !slActive && !trailingActive) {
+  const timeoutActive =
+    systemProtectionConfig.timeoutProfitEnabled &&
+    systemProtectionConfig.timeoutMinHoldMinutes > 0 &&
+    systemProtectionConfig.timeoutDrawdownPercent > 0 &&
+    systemProtectionConfig.timeoutClosePercent > 0;
+  if (!tpActive && !slActive && !trailingActive && !timeoutActive) {
     return;
   }
 
@@ -982,6 +1008,7 @@ async function performSystemProtection() {
 
     const trailingTiers = systemProtectionConfig.trailingTiers || [];
 
+    const now = Date.now();
     for (const pos of positions) {
       const symbol = pos.symbol;
       const quantity = Number(pos.quantity || 0);
@@ -1064,6 +1091,94 @@ async function performSystemProtection() {
             } else {
               logger.warn(
                 `系统移动止盈 ${symbol} 失败: ${(result as ClosePositionResult).message ?? (result as ClosePositionResult).error}`,
+              );
+            }
+          }
+        }
+      }
+
+      if (
+        !triggered &&
+        timeoutActive
+      ) {
+        const openedAtRaw = pos.opened_at || pos.openedAt;
+        const openedAtMs = openedAtRaw ? Date.parse(openedAtRaw) : Number.NaN;
+        const ageMinutes = Number.isFinite(openedAtMs)
+          ? (now - openedAtMs) / 60000
+          : Number.NaN;
+        const minHold = systemProtectionConfig.timeoutMinHoldMinutes;
+        const minPeak = systemProtectionConfig.timeoutMinPeakPercent;
+        if (
+          Number.isFinite(ageMinutes) &&
+          ageMinutes >= minHold &&
+          storedPeak >= minPeak &&
+          pnlPercent > 0
+        ) {
+          const drawdownPercent =
+            storedPeak > 0
+              ? ((storedPeak - pnlPercent) / Math.max(storedPeak, 0.0001)) * 100
+              : 0;
+          if (
+            drawdownPercent >= systemProtectionConfig.timeoutDrawdownPercent
+          ) {
+            let percentage = Math.min(
+              100,
+              Math.max(
+                1,
+                Math.round(systemProtectionConfig.timeoutClosePercent),
+              ),
+            );
+            let closeContracts = (quantity * percentage) / 100;
+            if (
+              systemProtectionConfig.timeoutMinCloseContracts > 0 &&
+              closeContracts >= systemProtectionConfig.timeoutMinCloseContracts
+            ) {
+              percentage = 100;
+              closeContracts = quantity;
+            } else if (closeContracts <= 0) {
+              percentage = 100;
+              closeContracts = quantity;
+            }
+            const result = await invokeSystemClosePosition(symbol, percentage);
+            if (result.success) {
+              triggered = true;
+              const actionDesc =
+                percentage === 100
+                  ? "全平"
+                  : `平仓 ${percentage}%`;
+              actions.push(
+                `系统持仓超时止盈 ${symbol}：持仓 ${ageMinutes.toFixed(
+                  1,
+                )} 分钟，峰值 ${storedPeak.toFixed(
+                  2,
+                )}% → 当前 ${pnlPercent.toFixed(
+                  2,
+                )}% (回撤 ${drawdownPercent.toFixed(2)}%)，${actionDesc}`,
+              );
+              await recordTradeHistoryEntry({
+                symbol,
+                side: pos.side,
+                type: "close",
+                price: currentPrice,
+                quantity: pos.quantity * (percentage / 100),
+                leverage,
+                pnl: Number.isFinite(pos.unrealized_pnl)
+                  ? pos.unrealized_pnl * (percentage / 100)
+                  : null,
+              });
+              await dbClient.execute({
+                sql: "UPDATE positions SET system_trailing_level = 0, system_tp_count = 0, peak_pnl_percent = ? WHERE symbol = ?",
+                args: [pnlPercent, symbol],
+              });
+              trailingLevelMap.set(symbol, 0);
+              tpCountMap.set(symbol, 0);
+              peakMap.set(symbol, pnlPercent);
+            } else {
+              logger.warn(
+                `系统持仓超时止盈 ${symbol} 失败: ${
+                  (result as ClosePositionResult).message ??
+                  (result as ClosePositionResult).error
+                }`,
               );
             }
           }
@@ -1453,14 +1568,41 @@ async function checkAccountThresholds(accountInfo: any): Promise<boolean> {
  * 执行交易决策
  * 优化：增强错误处理和数据验证，确保数据实时准确
  */
-async function executeTradingDecision() {
-  iterationCount++;
-  const minutesElapsed = Math.floor((Date.now() - tradingStartTime.getTime()) / 60000);
-  const intervalMinutes = Number.parseInt(process.env.TRADING_INTERVAL_MINUTES || "5");
-  
-  logger.info(`\n${"=".repeat(80)}`);
-  logger.info(`交易周期 #${iterationCount} (运行${minutesElapsed}分钟)`);
-  logger.info(`${"=".repeat(80)}\n`);
+async function executeTradingDecision(options: TradingDecisionOptions = {}) {
+  if (tradingDecisionRunning) {
+    logger.warn(
+      `交易循环仍在执行，跳过本次触发（${options.trigger ?? "scheduled"}）。`,
+    );
+    return;
+  }
+
+  tradingDecisionRunning = true;
+  const trigger = options.trigger ?? "scheduled";
+  const marketPulseEvent = options.marketPulseEvent ?? null;
+
+  const performCycle = async () => {
+    iterationCount++;
+    const minutesElapsed = Math.floor(
+      (Date.now() - tradingStartTime.getTime()) / 60000,
+    );
+    const intervalMinutes = Number.parseInt(
+      process.env.TRADING_INTERVAL_MINUTES || "5",
+    );
+
+    logger.info(`\n${"=".repeat(80)}`);
+    logger.info(`交易周期 #${iterationCount} (运行${minutesElapsed}分钟)`);
+    logger.info(
+      `触发原因：${
+        trigger === "market-pulse" ? "市场脉冲" : "定时调度"
+      }`,
+    );
+    if (marketPulseEvent) {
+      const summary = describeMarketPulseEvent(marketPulseEvent);
+      if (summary) {
+        logger.info(summary);
+      }
+    }
+    logger.info(`${"=".repeat(80)}\n`);
 
   const agentProfileRaw = process.env.AI_AGENT_PROFILE || "default";
   const agentProfile = agentProfileRaw.trim().toLowerCase();
@@ -1481,7 +1623,6 @@ async function executeTradingDecision() {
   let positions: any[] = [];
   let quantReports: QuantReport[] | undefined;
 
-  try {
     // 1. 收集市场数据
     if (runHybridAgent) {
       try {
@@ -1900,6 +2041,8 @@ async function executeTradingDecision() {
           tradeHistory,
           recentDecisions,
           quantReports,
+          triggerReason: trigger,
+          marketPulseEvent,
         })
       : useNakedKAgent
         ? generateNakedKPrompt({
@@ -1911,6 +2054,8 @@ async function executeTradingDecision() {
             positions,
             tradeHistory,
             recentDecisions,
+            triggerReason: trigger,
+            marketPulseEvent,
           })
         : generateTradingPrompt({
             minutesElapsed,
@@ -1921,6 +2066,8 @@ async function executeTradingDecision() {
             positions,
             tradeHistory,
             recentDecisions,
+            triggerReason: trigger,
+            marketPulseEvent,
           });
     
     // 输出完整提示词到日志
@@ -2092,7 +2239,10 @@ async function executeTradingDecision() {
       logger.error("修复历史盈亏失败:", fixError as any);
       // 不影响主流程，继续执行
     }
-    
+  };
+
+  try {
+    await performCycle();
   } catch (error) {
     logger.error("交易循环执行失败:", error as any);
     try {
@@ -2100,6 +2250,8 @@ async function executeTradingDecision() {
     } catch (recoveryError) {
       logger.error("恢复失败:", recoveryError as any);
     }
+  } finally {
+    tradingDecisionRunning = false;
   }
 }
 
@@ -2131,6 +2283,7 @@ export function startTradingLoop() {
   const intervalMinutes = Number.parseInt(
     process.env.TRADING_INTERVAL_MINUTES || "5"
   );
+  const intervalMs = intervalMinutes * 60 * 1000;
   
   logger.info(`启动交易循环，间隔: ${intervalMinutes} 分钟`);
   logger.info(`支持币种: ${SYMBOLS.join(", ")}`);
@@ -2140,16 +2293,54 @@ export function startTradingLoop() {
     logger.warn("⚠️  Dry-Run 模式正在运行：所有订单将仅在本地模拟，不会触发真实交易。");
   }
   
-  // 立即执行一次
-  executeTradingDecision();
+  // 立即执行一次，视为定时调度触发，用于初始化 next run
+  lastScheduledExecutionAt = Date.now();
+  nextScheduledExecutionAt = lastScheduledExecutionAt + intervalMs;
+  executeTradingDecision({ trigger: "scheduled" });
   
   // 设置定时任务
   const cronExpression = `*/${intervalMinutes} * * * *`;
   cron.schedule(cronExpression, () => {
-    executeTradingDecision();
+    lastScheduledExecutionAt = Date.now();
+    nextScheduledExecutionAt = lastScheduledExecutionAt + intervalMs;
+    executeTradingDecision({ trigger: "scheduled" });
   });
   
   logger.info(`定时任务已设置: ${cronExpression}`);
+
+  if (marketPulseConfig.enabled) {
+    startMarketPulseWatcher((event) => {
+      const timeUntilNextRunMs = getTimeUntilNextScheduledRunMs();
+      if (timeUntilNextRunMs <= marketPulseConfig.minGapToNextRunMs) {
+        logger.info(
+          `市场脉冲信号已捕获，但距离下次常规执行仅 ${Math.max(
+            0,
+            Math.floor(timeUntilNextRunMs / 1000),
+          )} 秒，跳过强制执行。`,
+        );
+        return;
+      }
+      logger.warn(
+        `市场脉冲信号触发提前执行：${describeMarketPulseEvent(event)}`,
+      );
+      if (marketPulseConfig.telegramNotifyEnabled) {
+        const nextSeconds = Number.isFinite(timeUntilNextRunMs)
+          ? Math.max(0, Math.round(timeUntilNextRunMs / 1000))
+          : undefined;
+        notifyMarketPulseTriggered(event, { nextRunSeconds: nextSeconds }).catch(
+          (error) => {
+            logger.warn(
+              `市场脉冲通知发送失败: ${(error as Error).message}`,
+            );
+          },
+        );
+      }
+      executeTradingDecision({
+        trigger: "market-pulse",
+        marketPulseEvent: event,
+      });
+    });
+  }
 
   if (systemProtectionConfig.enabled) {
     const interval = Math.max(systemProtectionConfig.checkIntervalMs, 1000);
