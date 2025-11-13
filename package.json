@@ -24,6 +24,7 @@
   "homepage": "https://github.com/yourusername/open-nof1.ai#readme",
   "scripts": {
     "dev": "tsx watch --env-file=.env ./src",
+    "dashboard": "tsx --env-file=.env ./src/dashboardServer.ts",
     "build": "tsdown",
     "start": "node dist/index.js",
     "lint": "biome check ./src",

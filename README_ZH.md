@@ -167,6 +167,7 @@ npm install
 ```env
 # 服务器配置
 PORT=3100
+TRADER_NAME=alpha-trader-1        # 每个实例唯一的交易员名称（仪表板显示用）
 
 # 交易参数
 TRADING_INTERVAL_MINUTES=5      # 交易循环间隔
@@ -408,6 +409,17 @@ npm run trading:stop
 # 重启交易系统
 npm run trading:restart
 ```
+
+### 多交易员仪表板
+
+```bash
+# 启动独立仪表板，仅用于汇总多个交易节点
+npm run dashboard
+```
+
+- 该服务不会启动交易循环，可部署在独立的监控主机上。
+- 启动后访问 `http://localhost:4141/dashboard/`，在页面中手动添加各交易节点（支持本机及局域网地址）。
+- 请确保每个节点的 `.env` 配置了唯一的 `TRADER_NAME`，便于在仪表板中识别。
 
 ### 数据库管理
 

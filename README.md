@@ -107,6 +107,7 @@ npm install
 ```env
 # 服务器配置
 PORT=3100
+TRADER_NAME=alpha-trader-1        # Unique name per trading instance (shown in dashboard)
 
 # 交易参数
 TRADING_INTERVAL_MINUTES=5      # 交易循环间隔
@@ -191,6 +192,18 @@ npm run trading:start
 ### 第七步：访问 Web 仪表板
 
 在浏览器中访问 `http://localhost:3100`
+
+### 可选：启动多交易员仪表板
+
+如果你在多台主机或不同端口上运行了多个交易节点，可以启动独立的汇总仪表板：
+
+```bash
+npm run dashboard
+```
+
+- 该进程不会启动交易循环，只负责聚合远端节点的数据；默认端口 `4141`。
+- 浏览器访问 `http://localhost:4141/dashboard/`，在页面中手动添加各节点地址（如 `http://172.16.8.223:3200`）。
+- 每个节点请在 `.env` 中配置唯一的 `TRADER_NAME`，仪表板会自动读取 `/api/trader/meta` 与 `/api/account` 展示名称、资产和收益。 
 
 ## 完整文档
 

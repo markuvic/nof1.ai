@@ -26,6 +26,7 @@ import { createExchangeClient } from "../services/exchanges";
 import { normalizeAccountSnapshot } from "../services/accountMetrics";
 import { createPinoLogger } from "@voltagent/logger";
 import { getCachedQuantReports } from "../services/quantReport";
+import { getTraderIdentity } from "../config/traderProfile";
 
 const logger = createPinoLogger({
   name: "api-routes",
@@ -36,11 +37,27 @@ const dbClient = createClient({
   url: process.env.DATABASE_URL || "file:./.voltagent/trading.db",
 });
 
+const serverStartedAt = new Date();
+
 export function createApiRoutes() {
   const app = new Hono();
 
   // 静态文件服务 - 需要使用绝对路径
   app.use("/*", serveStatic({ root: "./public" }));
+
+  /**
+   * 交易员元数据
+   */
+  app.get("/api/trader/meta", (c) => {
+    const identity = getTraderIdentity();
+    const uptimeSeconds = Math.floor((Date.now() - serverStartedAt.getTime()) / 1000);
+    return c.json({
+      ...identity,
+      version: process.env.npm_package_version ?? "0.0.0",
+      uptimeSeconds,
+      timestamp: new Date().toISOString(),
+    });
+  });
 
   /**
    * 获取账户总览
@@ -65,11 +82,13 @@ export function createApiRoutes() {
       
       // 从数据库获取初始资金
       const initialResult = await dbClient.execute(
-        "SELECT total_value FROM account_history ORDER BY timestamp ASC LIMIT 1"
+        "SELECT total_value, timestamp FROM account_history ORDER BY timestamp ASC LIMIT 1"
       );
-      const initialBalance = initialResult.rows[0]
-        ? Number.parseFloat(initialResult.rows[0].total_value as string)
+      const initialRow = initialResult.rows[0] as { total_value?: string; timestamp?: string } | undefined;
+      const initialBalance = initialRow?.total_value
+        ? Number.parseFloat(initialRow.total_value)
         : 100;
+      const accountStartAt = initialRow?.timestamp ?? null;
       
       // Gate.io 的 account.total 不包含未实现盈亏
       // 总资产（不含未实现盈亏）= account.total
@@ -82,13 +101,21 @@ export function createApiRoutes() {
         ? ((totalEquity - initialBalance) / initialBalance) * 100
         : 0;
       
+      const { traderName } = getTraderIdentity();
+
       return c.json({
+        traderName,
         totalBalance,  // 总资产（不包含未实现盈亏）
         availableBalance: snapshot.availableBalance,
         positionMargin: snapshot.positionMargin,
         unrealisedPnl,
         returnPercent,  // 收益率（不包含未实现盈亏）
         initialBalance,
+        accountStartAt,
+        tradingIntervalMinutes: Number.parseInt(
+          process.env.TRADING_INTERVAL_MINUTES || "5",
+          10,
+        ),
         timestamp: new Date().toISOString(),
       });
     } catch (error: any) {

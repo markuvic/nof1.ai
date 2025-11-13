@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>多交易员仪表板 | open-nof1.ai</title>
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="top-bar">
+        <div class="title-block">
+          <span class="badge">Multi Trader Monitor</span>
+          <h1>多交易员仪表板</h1>
+          <p class="subtitle">
+            该模块可独立部署，仅汇总多个交易节点的账户概览，<strong>不会启动任何交易循环</strong>。请为每个节点配置唯一的
+            <code>TRADER_NAME</code> 并确保可访问。
+          </p>
+        </div>
+        <div class="top-actions">
+          <span id="apiStatus" class="status-chip status-checking">检测中...</span>
+          <div class="top-buttons">
+            <button id="toggleFormBtn" class="btn outline">添加交易员</button>
+            <button id="refreshBtn" class="btn ghost">立即刷新</button>
+          </div>
+        </div>
+      </header>
+
+      <section id="addTraderPanel" class="panel hidden">
+        <div class="panel-header">
+          <div>
+            <h2>添加交易员</h2>
+            <p class="muted">输入运行中的节点地址，例如 <code>http://172.16.8.223:3200</code></p>
+          </div>
+          <button id="closeFormBtn" class="btn subtle" type="button">关闭</button>
+        </div>
+        <form id="nodeForm" class="node-form">
+          <label>
+            <span>节点地址</span>
+            <input type="text" id="nodeUrl" placeholder="http://127.0.0.1:3100" autocomplete="off" required />
+          </label>
+          <label>
+            <span>自定义名称（可选）</span>
+            <input type="text" id="nodeName" placeholder="裸K Scalper" autocomplete="off" />
+          </label>
+          <div class="form-actions">
+            <button type="button" id="testBtn" class="btn secondary">测试连接</button>
+            <button type="submit" class="btn primary">保存</button>
+          </div>
+          <p id="formMessage" class="form-message"></p>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>交易员列表</h2>
+            <p class="muted">仪表板每 5 秒刷新，点击按钮可跳转至对应节点的仪表板</p>
+          </div>
+          <span id="lastUpdated" class="muted">等待刷新...</span>
+        </div>
+        <div id="nodesContainer" class="node-grid"></div>
+      </section>
+    </div>
+
+    <script src="/dashboard/app.js" type="module"></script>
+  </body>
+</html>

@@ -168,6 +168,7 @@ Create `.env` file in project root:
 ```env
 # Server Configuration
 PORT=3100
+TRADER_NAME=alpha-trader-1        # Unique label for this trader (used by the multi-trader dashboard)
 
 # Trading Parameters
 TRADING_INTERVAL_MINUTES=5      # Trading loop interval
@@ -247,6 +248,18 @@ npm run trading:start
 
 Navigate to `http://localhost:3100` in your browser.
 
+### Optional: Multi-Trader Dashboard (Aggregator Only)
+
+When you run multiple trading nodes (e.g., different strategies on different ports or hosts) you can start the read-only aggregator:
+
+```bash
+npm run dashboard
+```
+
+- The dashboard process does not start any trading loop; it only polls `/api/account` and `/api/trader/meta` from the nodes you add manually.
+- Default port is `4141`, so the UI lives at `http://localhost:4141/dashboard/`.
+- Make sure every trading node sets a unique `TRADER_NAME` in `.env` so the overview can display clear labels.
+
 ## Project Structure
 
 ```
@@ -301,6 +314,7 @@ open-nof1.ai/
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `PORT` | HTTP server port | 3141 | No |
+| `TRADER_NAME` | Friendly label reported to the multi-trader dashboard | hostname:port | No |
 | `TRADING_INTERVAL_MINUTES` | Trading loop interval in minutes | 5 | No |
 | `MAX_LEVERAGE` | Maximum leverage multiplier | 10 | No |
 | `MAX_POSITIONS` | Maximum number of positions | 5 | No |
