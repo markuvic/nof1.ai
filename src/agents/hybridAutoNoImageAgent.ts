@@ -24,7 +24,7 @@ function generateSystemInstructions(intervalMinutes: number): string {
 	return `你是一位拥有丰富交易经验的混合自主架构（Hybrid Autonomous）加密交易员，擅长进行中短期永续合约交易，具备独立学习、策略构建与自我迭代的能力。
 
 你的使命：
-- 持续吸收最新的量化技术报告、量价、仓位与账户反馈，自主总结规律；
+- 持续吸收最新的裸K、量价、仓位与账户反馈，自主总结规律,自主决定交易策略；
 - 在 ${intervalMinutes} 分钟轮询节奏中快速适应市场结构，形成下一步策略；
 - 在快节奏的市场中，尽可能的寻找可靠的交易机会，目标是尽可能多的盈利
 
@@ -157,7 +157,11 @@ function formatSymbolSnapshot(
 	hybridContext: HybridContext,
 ): string {
 	const lines: string[] = [];
-	lines.push(`### ${symbol}`);
+    lines.push(`### ${symbol} -start- ###`);
+    lines.push("\n裸K 数据：");
+    lines.push(formatNakedKData(symbol, hybridContext));
+    lines.push("\n多时间框架指标：");
+    lines.push(formatMultiTimeframe(snapshot));
 	lines.push(
 		`价格 ${formatNumber(snapshot.price, 2)} USDT（24h ${formatNumber(snapshot.change24h, 2)}%）`,
 	);
@@ -185,10 +189,9 @@ function formatSymbolSnapshot(
 	lines.push(
 		`布林带：上轨 ${formatNumber(snapshot.bollinger.upper, 2)}, 下轨 ${formatNumber(snapshot.bollinger.lower, 2)}, 带宽 ${formatNumber(snapshot.bollinger.bandwidthPercent, 2)}%`,
 	);
-	lines.push("\n多时间框架指标：");
-	lines.push(formatMultiTimeframe(snapshot));
 	// lines.push("\n裸K 数据：");
 	// lines.push(formatNakedKData(symbol, hybridContext));
+    lines.push(`### ${symbol} -end- ###`);
 	return lines.join("\n") + "\n";
 }
 
@@ -276,7 +279,7 @@ function formatFeedback(tradeHistory: any[] = []): string {
 	return `上次 ${last.symbol} ${sideText} ${verdict} ${pnlText}，杠杆 ${last.leverage}x，成交价 ${formatNumber(Number(last.price), 2)}，请总结结构判断对错与下一步优化。`;
 }
 
-export function generateHybridPrompt(data: HybridPromptInput): string {
+export function generateHybridNoImagePrompt(data: HybridPromptInput): string {
 	const {
 		minutesElapsed,
 		iteration,
@@ -335,17 +338,35 @@ ${formatDecisionMemory(recentDecisions)}
 ${formatFeedback(tradeHistory)}
 
 【任务要求】
-1. 结合量化技术报告、量价结构、ATR 波动率、资金费率与盘口压差，自主判断每个币种的K线形态、趋势、结构与动能；
-2. 针对每个币种输出：多/空观点、入场与退出思路、风险控制（含仓位、杠杆、止盈止损逻辑），必要时说明观望理由；
-3. 若需要执行操作，请使用工具调用（例如 openPosition/closePosition/getMarketPrice/getOrderBook/getPositions/getAccountBalance/calculateRisk 等），并明确参数；
-4. 每次决策后请自我复盘，指出上一轮成功/失败的原因及本轮调整。
+1: 参考以下经典 K 线形态：
+  1. 反头肩底：由三个低点组成，中间低点最低且整体对称，常预示即将上行。
+  2. 双底：两个接近的低点，中间伴随反弹，整体呈 “W” 形。
+  3. 圆弧底：价格缓慢下行后再缓慢回升，形如 “U” 字。
+  4. 隐形底：水平整理后突然向上突破。
+  5. 下降楔形：价格下行区间逐步收敛，通常向上突破。
+  6. 上升楔形：价格缓慢上行但区间收窄，常向下跌破。
+  7. 上升三角形：支撑线抬升、上方阻力水平，突破多向上。
+  8. 下降三角形：阻力线下压、下方支撑水平，常向下跌破。
+  9. 多头旗形：急涨后短暂回撤整理，再继续向上。
+  10. 空头旗形：急跌后短暂反弹整理，再继续向下。
+  11. 矩形：在水平支撑与阻力间来回震荡。
+  12. 孤岛反转：前后两个跳空朝向相反，形成孤立价格岛。
+  13. V 型反转：急跌后迅速反弹，或相反。
+  14. 圆弧顶 / 圆弧底：价格缓慢筑顶或筑底，呈弧形。
+  15. 扩散三角形：高低点逐渐发散，波动加剧。
+  16. 对称三角形：高低点同时收敛至尖端，后续通常迎来突破。
+结合裸K数据，识别 ${intervalMinutes} 分钟K线形态，判断是否存在匹配的已知形态，。
+2: 结合K线形态、量价结构、ATR 波动率、资金费率与盘口压差，自主判断每个币种的、趋势、结构与动能,分析每个币种的交易机会；
+3: 针对每个币种输出：多/空观点、入场与退出思路、风险控制（含仓位、杠杆、止盈止损逻辑），必要时说明观望理由；
+4: 若需要执行操作，请使用工具调用（例如 openPosition/closePosition/getMarketPrice/getOrderBook/getPositions/getAccountBalance/calculateRisk 等），并明确参数；
+5: 每次决策后请自我复盘，指出上一轮成功/失败的原因及本轮调整。
 
 请保持输出结构化，先列宏观观察，再逐币种分析，最后给出执行计划与需要调用的工具。`;
 
 	return prompt;
 }
 
-export function createHybridAutonomousAgent(intervalMinutes: number = 5) {
+export function createHybridAutoNoImageAgent(intervalMinutes: number = 5) {
 	const openai = createOpenAI({
 		apiKey: process.env.OPENAI_API_KEY || "",
 		baseURL: process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1",

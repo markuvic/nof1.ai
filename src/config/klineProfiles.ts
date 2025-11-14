@@ -26,10 +26,7 @@ const profiles: Record<KlineProfileId, KlineProfileDefinition> = {
     id: "scalper",
     description: "高频短线：1m/3m/15m/1h，侧重敏捷触发",
     intervals: [
-      { frame: "1m", limit: 120 },
-      { frame: "3m", limit: 80 },
-      { frame: "15m", limit: 48 },
-      { frame: "1h", limit: 36 },
+      { frame: "15m", limit: 96 },
     ],
     retentionBuffer: 24,
   },

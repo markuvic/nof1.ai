@@ -1,0 +1,218 @@
+⸻
+
+本周期执行信息
+
+执行时间：${timestamp}
+执行周期：每 1 小时
+
+市场脉冲触发器：${market_pulse_trigger ? ‘触发（提前执行）’ : ‘未触发’}
+
+若由行情剧烈波动触发提前执行，此处为 true。
+
+⸻
+
+【账户状态】
+	•	账户净值：${account.balance} USDT
+	•	可用资金：${account.available} USDT
+	•	当前回撤：${account.drawdownPercent}%
+	•	当前持仓数量：${positions.length}
+	•	允许持仓上限：${RISK_PARAMS.MAX_POSITIONS}
+
+⸻
+
+【当前持仓列表】
+
+${positions.length === 0 ? ‘（当前无任何持仓）’ : ‘’}
+
+${positions.map(p => `
+
+▸ ${p.symbol}
+	•	方向：${p.side}
+	•	开仓价：${p.entryPrice}
+	•	当前价：${p.marketPrice}
+	•	盈亏：${p.pnlPercent}%
+	•	峰值盈利（peak）：${p.peakPnlPercent}%
+	•	持仓时长：${p.holdHours} 小时
+	•	杠杆：${p.leverage}x
+	•	批次：${p.batchCount}（加仓次数：${p.batchCount - 1}）
+`).join(’\n’)}
+
+⸻
+
+【市场环境标签（全局）】
+	•	波动率：${marketEnvironment.volatility}
+	•	趋势环境：${marketEnvironment.trendEnvironment}
+	•	BTC 主导地位：${marketEnvironment.btcDominance}
+	•	资金费率环境：${marketEnvironment.fundingBias}
+	•	市场脉冲触发：${market_pulse_trigger}
+
+⸻
+
+【多交易对市场数据（按交易对逐一提供）】
+
+所有数据按 最旧 → 最新 排列。
+每个 symbol 都有：15m / 1h / 4h / 1d + 技术指标（精简版）。
+
+⸻
+
+交易对数量：${symbols.length}
+
+⸻
+
+${symbols.map(sym => `
+
+ ${sym}（${sym}）· 多周期行情数据
+
+====================================================
+
+◆ 15m 数据
+
+K线数量：${k[sym][“15m”].length}
+```json
+${JSON.stringify(k[sym][“15m”])}
+```
+
+技术指标（15m）
+
+```json
+${JSON.stringify(indicators[sym][“15m”])}
+```
+
+⸻
+
+◆ 1h 数据
+
+K线数量：${k[sym][“1h”].length}
+```json
+${JSON.stringify(k[sym][“1h”])}
+```
+
+技术指标（1h）
+
+```json
+${JSON.stringify(indicators[sym][“1h”])}
+```
+
+⸻
+
+◆ 4h 数据
+
+K线数量：${k[sym][“4h”].length}
+```json
+${JSON.stringify(k[sym][“4h”])}
+```
+
+技术指标（4h）
+
+```json
+${JSON.stringify(indicators[sym][“4h”])}
+```
+
+⸻
+
+◆ 1d 数据
+
+K线数量：${k[sym][“1d”].length}
+```json
+${JSON.stringify(k[sym][“1d”])}
+```
+
+技术指标（1d）
+
+```json
+${JSON.stringify(indicators[sym][“1d”])}
+```
+
+⸻
+
+`).join(’\n’)}
+
+⸻
+
+【数据说明（LLM 必须遵守）】
+
+你需要基于 每个币种独立分析趋势、结构与概率。
+
+数据包含：
+	•	纯 OHLCV K 线（15m / 1h / 4h / 1d）
+	•	精简技术指标（EMA20/50, MACD, RSI14, Vol/AvgVol）
+	•	当前持仓与盈亏情况
+	•	全局市场环境（趋势/波动性）
+
+你必须自行判断：
+	•	趋势方向（多周期一致性）
+	•	结构（HH/HL vs LH/LL）
+	•	突破 or 假突破
+	•	回调强弱（缩量/放量）
+	•	通道、区间、楔形、震荡等结构
+	•	RR（风险收益比）
+	•	是否处于危险位置（如日线阻力）
+	•	是否反转
+	•	是否需要平仓
+	•	是否值得开仓
+	•	是否继续观望
+
+⸻
+
+【工具调用权限】
+
+本周期你有权限使用以下工具：
+	•	openPosition(sym, side)（市价单）
+	•	closePosition(sym)（全部平仓）
+	•	closePosition(sym, percentage)（部分平仓）
+	•	getAccountBalance
+	•	getPositions
+	•	getMarketPrice
+	•	getOrderBook
+
+如果你选择不调用任何工具，即视为“观望”。
+
+⸻
+
+【你的任务（对每个交易对独立分析）】
+
+你必须对 每个 symbol 分别 输出：
+
+（1）市场结构分析
+	•	多周期趋势方向
+	•	高低点结构（HH/HL、LH/LL）
+	•	关键阻力与支撑
+	•	是否突破 / 假突破
+	•	是否反转
+	•	量能是否支持结构
+	•	是否进入震荡区间
+	•	是否具备趋势共振
+
+（2）决策理由
+
+说明你为什么选择：
+	•	开多
+	•	开空
+	•	平仓
+	•	或观望
+
+理由必须基于结构、趋势、量能、RR。
+
+（3）最终行为
+
+必须给出明确行为之一：
+	•	调用 openPosition
+	•	调用 closePosition
+	•	调用 closePosition（部分）
+	•	观望（不调用任何工具）
+
+你必须避免模糊表达。
+
+⸻
+
+【必须遵守的行为规范】
+	•	每个交易对必须 独立评估、多独立决策
+	•	不允许因为某个币强/弱就推论其他币同方向
+	•	不允许无依据地开仓或平仓
+	•	不允许忽略量能
+	•	不允许忽略趋势一致性
+	•	不允许忽略 RR
+	•	不允许忽略震荡风险
+	•	不允许做模糊判断
+
+⸻

@@ -332,14 +332,17 @@ export function createApiRoutes() {
       const limit = Number.parseInt(c.req.query("limit") || "10");
       const symbol = c.req.query("symbol"); // 可选，筛选特定币种
       
-      // 从数据库获取历史交易记录
-      let sql = `SELECT * FROM trades ORDER BY timestamp DESC LIMIT ?`;
-      let args: any[] = [limit];
-      
+      // 从数据库获取历史交易记录（忽略系统风控占位记录）
+      const tradeWhere: string[] = ["status != 'system-close'"];
+      const tradeArgs: any[] = [];
       if (symbol) {
-        sql = `SELECT * FROM trades WHERE symbol = ? ORDER BY timestamp DESC LIMIT ?`;
-        args = [symbol, limit];
+        tradeWhere.push("symbol = ?");
+        tradeArgs.push(symbol);
       }
+
+      const tradeWhereClause = tradeWhere.length > 0 ? `WHERE ${tradeWhere.join(" AND ")}` : "";
+      const sql = `SELECT * FROM trades ${tradeWhereClause} ORDER BY timestamp DESC LIMIT ?`;
+      const args = [...tradeArgs, limit];
       
       const result = await dbClient.execute({
         sql,
@@ -416,6 +419,14 @@ export function createApiRoutes() {
       const sinceTimestamp = startResult.rows[0]?.timestamp as string | undefined;
       const hasSince = typeof sinceTimestamp === "string" && sinceTimestamp.length > 0;
 
+      const statsWhere: string[] = ["status != 'system-close'"];
+      const statsArgs: any[] = [];
+      if (hasSince) {
+        statsWhere.push("timestamp >= ?");
+        statsArgs.push(sinceTimestamp);
+      }
+      const statsWhereClause = statsWhere.length > 0 ? `WHERE ${statsWhere.join(" AND ")}` : "";
+
       const aggregates = await dbClient.execute({
         sql: `
           SELECT
@@ -431,9 +442,9 @@ export function createApiRoutes() {
             SUM(COALESCE(fee, 0)) AS total_fee,
             AVG(COALESCE(fee, 0)) AS avg_fee
           FROM trades
-          ${hasSince ? "WHERE timestamp >= ?" : ""}
+          ${statsWhereClause}
         `,
-        args: hasSince ? [sinceTimestamp] : undefined,
+        args: statsArgs.length > 0 ? statsArgs : undefined,
       });
 
       const row = aggregates.rows[0] ?? {};

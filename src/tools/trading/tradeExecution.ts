@@ -382,22 +382,25 @@ export const openPositionTool = createTool({
       }
       
       // 根据波动率调整参数
-      if (volatilityLevel === "high") {
-        const adjustment = strategyParams.volatilityAdjustment.highVolatility;
-        adjustedLeverage = Math.max(1, Math.round(leverage * adjustment.leverageFactor));
-        const targetMargin = Math.min(amountUsdt, Math.max(3, amountUsdt * adjustment.positionFactor));
-        adjustedAmountUsdt = targetMargin;
-        logger.info(`🌊 高波动市场 (ATR ${atrPercent.toFixed(2)}%)：杠杆 ${leverage}x → ${adjustedLeverage}x，仓位 ${amountUsdt.toFixed(0)} → ${adjustedAmountUsdt.toFixed(0)} USDT`);
-      } else if (volatilityLevel === "low") {
-        const adjustment = strategyParams.volatilityAdjustment.lowVolatility;
-        adjustedLeverage = Math.min(RISK_PARAMS.MAX_LEVERAGE, Math.round(leverage * adjustment.leverageFactor));
-        adjustedAmountUsdt = Math.min(totalBalance * 0.32, amountUsdt * adjustment.positionFactor);
-        logger.info(`🌊 低波动市场 (ATR ${atrPercent.toFixed(2)}%)：杠杆 ${leverage}x → ${adjustedLeverage}x，仓位 ${amountUsdt.toFixed(0)} → ${adjustedAmountUsdt.toFixed(0)} USDT`);
-      } else {
-        adjustedLeverage = Math.min(RISK_PARAMS.MAX_LEVERAGE, Math.round(leverage));
-        adjustedAmountUsdt = amountUsdt;
-        logger.info(`🌊 正常波动市场 (ATR ${atrPercent.toFixed(2)}%)：保持原始参数 ${adjustedLeverage}x`);
-      }
+      // if (volatilityLevel === "high") {
+      //   const adjustment = strategyParams.volatilityAdjustment.highVolatility;
+      //   adjustedLeverage = Math.max(1, Math.round(leverage * adjustment.leverageFactor));
+      //   const targetMargin = Math.min(amountUsdt, Math.max(3, amountUsdt * adjustment.positionFactor));
+      //   adjustedAmountUsdt = targetMargin;
+      //   logger.info(`🌊 高波动市场 (ATR ${atrPercent.toFixed(2)}%)：杠杆 ${leverage}x → ${adjustedLeverage}x，仓位 ${amountUsdt.toFixed(0)} → ${adjustedAmountUsdt.toFixed(0)} USDT`);
+      // } else if (volatilityLevel === "low") {
+      //   const adjustment = strategyParams.volatilityAdjustment.lowVolatility;
+      //   adjustedLeverage = Math.min(RISK_PARAMS.MAX_LEVERAGE, Math.round(leverage * adjustment.leverageFactor));
+      //   adjustedAmountUsdt = Math.min(totalBalance * 0.32, amountUsdt * adjustment.positionFactor);
+      //   logger.info(`🌊 低波动市场 (ATR ${atrPercent.toFixed(2)}%)：杠杆 ${leverage}x → ${adjustedLeverage}x，仓位 ${amountUsdt.toFixed(0)} → ${adjustedAmountUsdt.toFixed(0)} USDT`);
+      // } else {
+      //   adjustedLeverage = Math.min(RISK_PARAMS.MAX_LEVERAGE, Math.round(leverage));
+      //   adjustedAmountUsdt = amountUsdt;
+      //   logger.info(`🌊 正常波动市场 (ATR ${atrPercent.toFixed(2)}%)：保持原始参数 ${adjustedLeverage}x`);
+      // }
+      adjustedLeverage = Math.min(RISK_PARAMS.MAX_LEVERAGE, Math.round(leverage));
+      adjustedAmountUsdt = amountUsdt;
+      logger.info(`🌊 正常波动市场 (ATR ${atrPercent.toFixed(2)}%)：保持原始参数 ${adjustedLeverage}x`);
       
       // 根据账户可用资金再次校准保证金（保留一定缓冲防止撮合失败）
       const reserveBuffer = Math.max(0.5, availableBalance * 0.05);

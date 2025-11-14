@@ -25,13 +25,17 @@ import { createClient } from "@libsql/client";
 import { createTradingAgent, generateTradingPrompt, getAccountRiskConfig, getTradingStrategy, getStrategyParams } from "../agents/tradingAgent";
 import { createNakedKAgent, generateNakedKPrompt } from "../agents/nakedKAgent";
 import { createHybridAutonomousAgent, generateHybridPrompt } from "../agents/hybridAutonomousAgent";
+import { createHybridAutoNoImageAgent, generateHybridNoImagePrompt } from "../agents/hybridAutoNoImageAgent";
 import { createQuantSignalAgent } from "../agents/quantSignalAgent";
+import { createLowFrequencyAgent, generateLowFrequencyPrompt } from "../agents/lowFrequencyAgent";
 import {
   createExchangeClient,
   getActiveExchangeId,
   isDryRunMode,
 } from "../services/exchanges";
 import { collectNakedKData } from "../services/marketData/nakedKCollector";
+import { collectLowFrequencyMarketDataset } from "../services/lowFrequencyAgent/dataCollector";
+import type { LowFrequencyMarketDataset } from "../services/lowFrequencyAgent/dataCollector";
 import { buildHybridContext, type HybridContext } from "../services/hybridContext";
 import { generateQuantReports } from "../services/quantReport";
 import type { QuantReport } from "../services/quantReport/types";
@@ -834,10 +838,16 @@ async function getPositions(cachedGatePositions?: any[]) {
     // 如果提供了缓存数据，使用缓存；否则重新获取
     const gatePositions = cachedGatePositions || await exchangeClient.getPositions();
     
-    // 从数据库获取持仓的开仓时间（数据库中保存了正确的开仓时间）
-    const dbResult = await dbClient.execute("SELECT symbol, opened_at FROM positions");
-      const dbOpenedAtMap = new Map(
-      dbResult.rows.map((row: any) => [row.symbol, row.opened_at])
+    // 从数据库获取持仓的开仓时间与峰值盈利
+    const dbResult = await dbClient.execute("SELECT symbol, opened_at, peak_pnl_percent FROM positions");
+    const dbMetaMap = new Map(
+      dbResult.rows.map((row: any) => [
+        row.symbol,
+        {
+          openedAt: row.opened_at,
+          peakPnlPercent: row.peak_pnl_percent,
+        },
+      ]),
     );
     
     // 过滤并格式化持仓
@@ -859,7 +869,11 @@ async function getPositions(cachedGatePositions?: any[]) {
         const unrealisedPnl = Number.parseFloat(p.unrealisedPnl || "0");
 
         // 优先从数据库读取开仓时间，确保时间准确
-        let openedAt = dbOpenedAtMap.get(symbol);
+        const dbMeta = dbMetaMap.get(symbol);
+        let openedAt = dbMeta?.openedAt;
+        let peakPnlPercent = dbMeta?.peakPnlPercent
+          ? Number.parseFloat(dbMeta.peakPnlPercent as string)
+          : 0;
         
         // 如果数据库中没有，尝试从Gate.io的create_time获取
         if (!openedAt && p.create_time) {
@@ -877,6 +891,10 @@ async function getPositions(cachedGatePositions?: any[]) {
           logger.warn(`${symbol} 持仓的开仓时间缺失，使用当前时间`);
         }
         
+        if (!Number.isFinite(peakPnlPercent)) {
+          peakPnlPercent = 0;
+        }
+        
       return {
         symbol,
         contract: p.contract,
@@ -891,6 +909,7 @@ async function getPositions(cachedGatePositions?: any[]) {
         opened_at: openedAt,
         price_change_percent: priceChangePercent,
         pnl_percent: pnlPercent,
+        peak_pnl_percent: peakPnlPercent,
       };
       });
     
@@ -1608,9 +1627,11 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
   const agentProfile = agentProfileRaw.trim().toLowerCase();
   const normalizedProfile = agentProfile.replace(/[\s_]+/g, "-");
   const useNakedKAgent = ["naked-k", "nakedk", "naked"].includes(normalizedProfile);
+  const useLowFrequencyAgent = ["low-frequency", "lowfreq", "low-frequency-agent", "swing", "swing-agent"].includes(normalizedProfile);
   const useHybridAgent = ["hybrid", "hybrid-agent", "hybrid-autonomous", "hybrid-autonomous-agent", "hybridautonomous", "hybridagent"].includes(normalizedProfile);
   const useQuantHybridAgent = ["quant-hybrid", "hybrid-quant", "quant", "quant-agent"].includes(normalizedProfile);
-  const runHybridAgent = useHybridAgent || useQuantHybridAgent;
+  const useQuantHybridNoImageAgent = ["quant-hybrid-no-image", "hybrid-quant-no-image"].includes(normalizedProfile);
+  const runHybridAgent = useHybridAgent || useQuantHybridAgent || useQuantHybridNoImageAgent;
   logger.info(`当前 AI Agent Profile: ${normalizedProfile}`);
   if (useQuantHybridAgent) {
     logger.info("量化混合代理模式已启用：将生成技术报告并注入 Hybrid Prompt。");
@@ -1619,6 +1640,7 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
   let marketData: any = {};
   let nakedKData: any = null;
   let hybridContext: HybridContext | null = null;
+  let lowFrequencyDataset: LowFrequencyMarketDataset | null = null;
   let accountInfo: any = null;
   let positions: any[] = [];
   let quantReports: QuantReport[] | undefined;
@@ -1657,6 +1679,17 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
         }
       } catch (error) {
         logger.error("收集裸K 数据失败:", error as any);
+        return;
+      }
+    } else if (useLowFrequencyAgent) {
+      try {
+        lowFrequencyDataset = await collectLowFrequencyMarketDataset(SYMBOLS);
+        if (!lowFrequencyDataset || lowFrequencyDataset.symbols.length === 0) {
+          logger.error("低频 Agent 数据为空，跳过本次循环");
+          return;
+        }
+      } catch (error) {
+        logger.error("收集低频 Agent 数据失败:", error as any);
         return;
       }
     } else {
@@ -1984,7 +2017,9 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
       ? hybridContext && Object.keys(hybridContext.snapshots || {}).length > 0
       : useNakedKAgent
         ? nakedKData && Object.keys(nakedKData).length > 0
-        : marketData && Object.keys(marketData).length > 0;
+        : useLowFrequencyAgent
+          ? lowFrequencyDataset && (lowFrequencyDataset.symbols?.length ?? 0) > 0
+          : marketData && Object.keys(marketData).length > 0;
     const dataValid =
       hasMarketDataset &&
       accountInfo &&
@@ -1997,7 +2032,9 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
         `数据详情 -> ${
           useNakedKAgent
             ? `裸K数据: ${Object.keys(nakedKData || {}).length}`
-            : `市场数据: ${Object.keys(marketData || {}).length}`
+            : useLowFrequencyAgent
+              ? `低频数据: ${lowFrequencyDataset?.symbols?.length ?? 0}`
+              : `市场数据: ${Object.keys(marketData || {}).length}`
         }, 账户: ${accountInfo?.totalBalance}, 持仓: ${positions.length}`,
       );
       return;
@@ -2031,7 +2068,19 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
     
     // 9. 生成提示词并调用 Agent
     const prompt = runHybridAgent
-      ? generateHybridPrompt({
+      ? (useQuantHybridNoImageAgent?generateHybridNoImagePrompt({
+        minutesElapsed,
+        iteration: iterationCount,
+        intervalMinutes,
+        hybridContext: hybridContext!,
+        accountInfo,
+        positions,
+        tradeHistory,
+        recentDecisions,
+        quantReports,
+        triggerReason: trigger,
+        marketPulseEvent,
+      }):generateHybridPrompt({
           minutesElapsed,
           iteration: iterationCount,
           intervalMinutes,
@@ -2043,7 +2092,7 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
           quantReports,
           triggerReason: trigger,
           marketPulseEvent,
-        })
+        }))
       : useNakedKAgent
         ? generateNakedKPrompt({
             minutesElapsed,
@@ -2057,7 +2106,18 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
             triggerReason: trigger,
             marketPulseEvent,
           })
-        : generateTradingPrompt({
+        : useLowFrequencyAgent
+          ? generateLowFrequencyPrompt({
+            accountInfo,
+            positions,
+            dataset: lowFrequencyDataset!,
+            iteration: iterationCount,
+            minutesElapsed,
+            intervalMinutes,
+            triggerReason: trigger,
+            marketPulseEvent,
+          })
+          : generateTradingPrompt({
             minutesElapsed,
             iteration: iterationCount,
             intervalMinutes,
@@ -2077,10 +2137,16 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
     logger.info("=".repeat(80) + "\n");
     
     const agent = runHybridAgent
-      ? (useQuantHybridAgent ? createQuantSignalAgent(intervalMinutes) : createHybridAutonomousAgent(intervalMinutes))
+      ? (useQuantHybridAgent
+        ? createQuantSignalAgent(intervalMinutes)
+        : (useQuantHybridNoImageAgent
+          ? createHybridAutoNoImageAgent(intervalMinutes)
+          : createHybridAutonomousAgent(intervalMinutes)))
       : useNakedKAgent
         ? createNakedKAgent(intervalMinutes)
-        : createTradingAgent(intervalMinutes);
+        : useLowFrequencyAgent
+          ? createLowFrequencyAgent(intervalMinutes)
+          : createTradingAgent(intervalMinutes);
     
     try {
       // 设置足够大的 maxOutputTokens 以避免输出被截断
