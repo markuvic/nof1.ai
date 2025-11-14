@@ -81,6 +81,7 @@ let nextScheduledExecutionAt = 0;
 let activeLoopIntervalMinutes = tradingLoopConfig.defaultIntervalMinutes;
 let tradingLoopTimer: NodeJS.Timeout | null = null;
 let loopSchedulerInitialized = false;
+let skipNextAutoSchedule = false;
 
 interface TradingDecisionOptions {
   trigger?: "scheduled" | "market-pulse";
@@ -114,6 +115,26 @@ function resolveNextIntervalMinutes(): number {
   return tradingLoopConfig.defaultIntervalMinutes;
 }
 
+function shouldAlignFixedInterval(): boolean {
+  return (
+    tradingLoopConfig.alignFixedInterval &&
+    !tradingLoopConfig.llmControlEnabled
+  );
+}
+
+function calculateAlignedNextRunTimestamp(intervalMinutes: number): number {
+  const now = new Date();
+  const next = new Date(now.getTime());
+  next.setSeconds(0, 0);
+  let minutes = next.getMinutes();
+  const remainder = minutes % intervalMinutes;
+  const minutesToAdd = remainder === 0
+    ? intervalMinutes
+    : intervalMinutes - remainder;
+  next.setMinutes(minutes + minutesToAdd);
+  return next.getTime();
+}
+
 function scheduleNextTradingRun(reason: string) {
   const intervalMinutes = resolveNextIntervalMinutes();
   activeLoopIntervalMinutes = intervalMinutes;
@@ -123,9 +144,18 @@ function scheduleNextTradingRun(reason: string) {
     clearTimeout(tradingLoopTimer);
   }
 
-  const scheduledAt = Date.now();
-  nextScheduledExecutionAt = scheduledAt + intervalMs;
+  let targetTimestamp: number;
+  if (shouldAlignFixedInterval()) {
+    targetTimestamp = calculateAlignedNextRunTimestamp(intervalMinutes);
+  } else {
+    targetTimestamp = Date.now() + intervalMs;
+  }
+  const delayMs = Math.max(targetTimestamp - Date.now(), 1000);
+  nextScheduledExecutionAt = targetTimestamp;
   loopSchedulerInitialized = true;
+  if (reason !== "auto") {
+    skipNextAutoSchedule = true;
+  }
 
   tradingLoopTimer = setTimeout(() => {
     lastScheduledExecutionAt = Date.now();
@@ -133,10 +163,10 @@ function scheduleNextTradingRun(reason: string) {
     executeTradingDecision({ trigger: "scheduled" }).finally(() => {
       scheduleNextTradingRun("auto");
     });
-  }, intervalMs);
+  }, delayMs);
 
   logger.info(
-    `已安排下一次交易循环（原因：${reason}），${intervalMinutes} 分钟后执行（约在 ${new Date(nextScheduledExecutionAt).toLocaleString("zh-CN", { hour12: false })}）。`,
+    `已安排下一次交易循环（原因：${reason}），${intervalMinutes} 分钟后执行（约在 ${new Date(targetTimestamp).toLocaleString("zh-CN", { hour12: false })}，${shouldAlignFixedInterval() ? "已对齐刻度" : "相对延迟"}）。`,
   );
 }
 
@@ -144,7 +174,7 @@ export function getTradingLoopRuntimeInfo() {
   return {
     llmControlEnabled: tradingLoopConfig.llmControlEnabled,
     defaultIntervalMinutes: tradingLoopConfig.defaultIntervalMinutes,
-    activeIntervalMinutes,
+    activeIntervalMinutes: activeLoopIntervalMinutes,
     nextRunAt: nextScheduledExecutionAt
       ? new Date(nextScheduledExecutionAt).toISOString()
       : null,
@@ -2381,6 +2411,12 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
     }
   } finally {
     tradingDecisionRunning = false;
+    if (skipNextAutoSchedule) {
+      skipNextAutoSchedule = false;
+      logger.debug("本轮自动调度已由外部请求覆盖，跳过 auto 重新排程。");
+    } else {
+      scheduleNextTradingRun("auto");
+    }
   }
 }
 

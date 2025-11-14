@@ -19,6 +19,10 @@ export interface TradingLoopConfig {
 	 * LLM 调整间隔的最大限制
 	 */
 	llmMaxIntervalMinutes: number;
+	/**
+	 * 固定调度是否对齐到分钟刻度（仅在未启用 LLM 动态调度时有效）
+	 */
+	alignFixedInterval: boolean;
 }
 
 const DEFAULT_INTERVAL_MINUTES = 5;
@@ -70,11 +74,14 @@ export function getTradingLoopConfig(): TradingLoopConfig {
 	);
 
 	const maxMinutes = Math.max(minMinutes, rawMaxMinutes);
+	const alignFixedInterval =
+		process.env.TRADING_LOOP_ALIGN_TO_INTERVAL === "true";
 
 	return {
 		defaultIntervalMinutes,
 		llmControlEnabled,
 		llmMinIntervalMinutes: minMinutes,
 		llmMaxIntervalMinutes: maxMinutes,
+		alignFixedInterval,
 	};
 }

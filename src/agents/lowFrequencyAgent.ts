@@ -6,6 +6,7 @@ import { LibSQLMemoryAdapter } from "@voltagent/libsql";
 import { createPinoLogger } from "@voltagent/logger";
 import type { LevelWithSilent } from "pino";
 import { RISK_PARAMS } from "../config/riskParams";
+import { getTradingLoopConfig } from "../config/tradingLoop";
 import type {
 	LowFrequencyMarketDataset,
 	MarketEnvironmentSnapshot,
@@ -25,6 +26,7 @@ const DEFAULT_SYSTEM_TEMPLATE_PATH =
 	process.env.LOW_FREQ_SYSTEM_TEMPLATE_PATH || "system_prompt_template.txt";
 const SECTION_SEPARATOR = "⸻";
 const CSV_HEADER = "idx,open,high,low,close,volume";
+
 
 interface PromptAccountSnapshot {
 	balance: number;
@@ -210,6 +212,7 @@ function renderLowFrequencyUserPrompt(context: {
 		extraContext,
 	} = context;
 
+	const { llmControlEnabled } = getTradingLoopConfig();
 	const lines: string[] = [];
 	lines.push("---------------------------","");
 	lines.push("本周期执行信息", "");
@@ -392,9 +395,15 @@ function renderLowFrequencyUserPrompt(context: {
 		"不允许忽略 RR",
 		"不允许忽略震荡风险",
 		"不允许做模糊判断",
-		"必须在决策完成后调用工具设置下一次执行周期",
-		"---------------------------"
 	);
+	if (llmControlEnabled) {
+		lines.push(
+			"必须在决策完成后调用工具设置下一次执行周期",
+			"---------------------------",
+		);
+	} else {
+		lines.push("---------------------------");
+	}
 
 	return lines.join("\n");
 }
@@ -438,6 +447,7 @@ export function generateLowFrequencyPrompt(
 }
 
 function getSystemPrompt(intervalMinutes=60):string{
+	const { llmControlEnabled } = getTradingLoopConfig();
 	return `
 --------
 你是一名世界级的职业加密货币交易员与市场分析师。你的所有判断基于客观数据、结构与概率，而非固定策略。
@@ -635,7 +645,7 @@ K 线结构已按 最旧 → 最新 排列。
  . 不能机械执行策略（你不是机器人）
  . 不能忽视风险收益比
 
---------
+${llmControlEnabled ? `--------
 *重要*【下一次执行周期（自主决定）】
 你必须在每个周期的分析结束后，根据当前市场状态主动调用工具：set_next_trading_cycle_interval
 你根据市场状态判断的下一轮分析间隔：
@@ -648,8 +658,8 @@ K 线结构已按 最旧 → 最新 排列。
 不得省略该工具调用。
 
 如果你不确定市场状态，请选择系统设置默认时间${intervalMinutes}分钟
-
 --------
+` : "--------\n"}
 
 【你的最终目标】
 
