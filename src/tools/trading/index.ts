@@ -36,6 +36,9 @@ export {
   cancelOrderTool,
 } from "./tradeExecution";
 
+// 循环调度工具
+export { setNextTradingCycleIntervalTool } from "./schedulerControl";
+
 // 账户管理工具
 export {
   getAccountBalanceTool,
@@ -45,4 +48,3 @@ export {
   calculateRiskTool,
   syncPositionsTool,
 } from "./accountManagement";
-

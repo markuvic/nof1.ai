@@ -445,6 +445,7 @@ export function createNakedKAgent(intervalMinutes: number = 5) {
 			tradingTools.checkOrderStatusTool,
 			tradingTools.calculateRiskTool,
 			tradingTools.syncPositionsTool,
+			tradingTools.setNextTradingCycleIntervalTool,
 		],
 		memory,
 	});

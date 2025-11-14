@@ -24,6 +24,7 @@ import { startTradingLoop, initTradingSystem } from "./scheduler/tradingLoop";
 import { startAccountRecorder } from "./scheduler/accountRecorder";
 import { initDatabase } from "./database/init";
 import { RISK_PARAMS } from "./config/riskParams";
+import { getTradingLoopConfig } from "./config/tradingLoop";
 import { isDryRunMode } from "./services/exchanges";
 import { initTelegramBot, stopTelegramBot } from "./services/telegramBot";
 
@@ -49,6 +50,7 @@ const logger = createPinoLogger({
 
 // 全局服务器实例
 let server: any = null;
+const tradingLoopConfig = getTradingLoopConfig();
 
 /**
  * 主函数
@@ -96,7 +98,12 @@ async function main() {
   logger.info("系统启动完成！");
   logger.info("=".repeat(80));
   logger.info(`\n监控界面: http://localhost:${port}/`);
-  logger.info(`交易间隔: ${process.env.TRADING_INTERVAL_MINUTES || 5} 分钟`);
+  const intervalNote = tradingLoopConfig.llmControlEnabled
+    ? `（LLM 可在 ${tradingLoopConfig.llmMinIntervalMinutes}-${tradingLoopConfig.llmMaxIntervalMinutes} 分钟之间调整下一次循环）`
+    : "";
+  logger.info(
+    `交易间隔: ${tradingLoopConfig.defaultIntervalMinutes} 分钟${intervalNote}`,
+  );
   logger.info(`账户记录间隔: ${process.env.ACCOUNT_RECORD_INTERVAL_MINUTES || 10} 分钟`);
   logger.info(`支持币种: ${RISK_PARAMS.TRADING_SYMBOLS.join(', ')}`);
   logger.info(`最大杠杆: ${RISK_PARAMS.MAX_LEVERAGE}x`);

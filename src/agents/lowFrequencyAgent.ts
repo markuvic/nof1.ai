@@ -392,6 +392,7 @@ function renderLowFrequencyUserPrompt(context: {
 		"不允许忽略 RR",
 		"不允许忽略震荡风险",
 		"不允许做模糊判断",
+		"必须在决策完成后调用工具设置下一次执行周期",
 		"---------------------------"
 	);
 
@@ -436,7 +437,7 @@ export function generateLowFrequencyPrompt(
 	});
 }
 
-function getSystemPrompt():string{
+function getSystemPrompt(intervalMinutes=60):string{
 	return `
 --------
 你是一名世界级的职业加密货币交易员与市场分析师。你的所有判断基于客观数据、结构与概率，而非固定策略。
@@ -635,6 +636,20 @@ K 线结构已按 最旧 → 最新 排列。
  . 不能忽视风险收益比
 
 --------
+*重要*【下一次执行周期（自主决定）】
+你必须在每个周期的分析结束后，根据当前市场状态主动调用工具：set_next_trading_cycle_interval
+你根据市场状态判断的下一轮分析间隔：
+ . 趋势极强/快速发展/临近突破：15–30分钟
+ . 趋势发展但不急迫：45–90分钟
+ . 震荡/低波动/无机会：120–240分钟
+ . 大级别趋势完全稳固：240分钟
+
+你必须为每个决策周期设定下一次分析时间。
+不得省略该工具调用。
+
+如果你不确定市场状态，请选择系统设置默认时间${intervalMinutes}分钟
+
+--------
 
 【你的最终目标】
 
@@ -668,7 +683,7 @@ export function createLowFrequencyAgent(intervalMinutes = 60) {
 	});
 
 	//const systemPrompt = loadTemplate(DEFAULT_SYSTEM_TEMPLATE_PATH);
-	const systemPrompt = getSystemPrompt();
+	const systemPrompt = getSystemPrompt(intervalMinutes);
 	//logger.info(systemPrompt);
 	const agent = new Agent({
 		name: "low-frequency-agent",
@@ -683,6 +698,7 @@ export function createLowFrequencyAgent(intervalMinutes = 60) {
 			tradingTools.getPositionsTool,
 			tradingTools.openPositionTool,
 			tradingTools.closePositionTool,
+			tradingTools.setNextTradingCycleIntervalTool,
 		],
 		memory,
 	});

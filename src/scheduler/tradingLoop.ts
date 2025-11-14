@@ -19,7 +19,6 @@
 /**
  * 交易循环 - 定时执行交易决策
  */
-import cron from "node-cron";
 import { createPinoLogger } from "@voltagent/logger";
 import { createClient } from "@libsql/client";
 import { createTradingAgent, generateTradingPrompt, getAccountRiskConfig, getTradingStrategy, getStrategyParams } from "../agents/tradingAgent";
@@ -49,6 +48,11 @@ import { startMarketPulseWatcher } from "../services/marketPulse";
 import type { MarketPulseEvent } from "../types/marketPulse";
 import { describeMarketPulseEvent } from "../utils/marketPulseUtils";
 import { notifyMarketPulseTriggered } from "../services/notifier";
+import { getTradingLoopConfig } from "../config/tradingLoop";
+import {
+  consumePendingLoopOverride,
+  registerTradingLoopRescheduleHandler,
+} from "../services/tradingLoopControl";
 
 const logger = createPinoLogger({
   name: "trading-loop",
@@ -63,6 +67,7 @@ const dbClient = createClient({
 const SYMBOLS = [...RISK_PARAMS.TRADING_SYMBOLS] as string[];
 const systemProtectionConfig = getSystemProtectionConfig();
 const marketPulseConfig = getMarketPulseConfig();
+const tradingLoopConfig = getTradingLoopConfig();
 
 // 交易开始时间
 let tradingStartTime = new Date();
@@ -73,6 +78,9 @@ let systemProtectionExecuting = false;
 let tradingDecisionRunning = false;
 let lastScheduledExecutionAt = 0;
 let nextScheduledExecutionAt = 0;
+let activeLoopIntervalMinutes = tradingLoopConfig.defaultIntervalMinutes;
+let tradingLoopTimer: NodeJS.Timeout | null = null;
+let loopSchedulerInitialized = false;
 
 interface TradingDecisionOptions {
   trigger?: "scheduled" | "market-pulse";
@@ -84,6 +92,63 @@ function getTimeUntilNextScheduledRunMs(): number {
     return Number.POSITIVE_INFINITY;
   }
   return nextScheduledExecutionAt - Date.now();
+}
+
+function resolveNextIntervalMinutes(): number {
+  if (!tradingLoopConfig.llmControlEnabled) {
+    return tradingLoopConfig.defaultIntervalMinutes;
+  }
+  const overrideMinutes = consumePendingLoopOverride();
+  if (overrideMinutes !== null) {
+    const bounded = Math.min(
+      tradingLoopConfig.llmMaxIntervalMinutes,
+      Math.max(tradingLoopConfig.llmMinIntervalMinutes, overrideMinutes),
+    );
+    if (bounded !== overrideMinutes) {
+      logger.warn(
+        `接收到超出范围的循环覆盖值 ${overrideMinutes}，已自动调整到 ${bounded} 分钟。`,
+      );
+    }
+    return bounded;
+  }
+  return tradingLoopConfig.defaultIntervalMinutes;
+}
+
+function scheduleNextTradingRun(reason: string) {
+  const intervalMinutes = resolveNextIntervalMinutes();
+  activeLoopIntervalMinutes = intervalMinutes;
+  const intervalMs = Math.max(intervalMinutes * 60 * 1000, 1000);
+
+  if (tradingLoopTimer) {
+    clearTimeout(tradingLoopTimer);
+  }
+
+  const scheduledAt = Date.now();
+  nextScheduledExecutionAt = scheduledAt + intervalMs;
+  loopSchedulerInitialized = true;
+
+  tradingLoopTimer = setTimeout(() => {
+    lastScheduledExecutionAt = Date.now();
+    nextScheduledExecutionAt = 0;
+    executeTradingDecision({ trigger: "scheduled" }).finally(() => {
+      scheduleNextTradingRun("auto");
+    });
+  }, intervalMs);
+
+  logger.info(
+    `已安排下一次交易循环（原因：${reason}），${intervalMinutes} 分钟后执行（约在 ${new Date(nextScheduledExecutionAt).toLocaleString("zh-CN", { hour12: false })}）。`,
+  );
+}
+
+export function getTradingLoopRuntimeInfo() {
+  return {
+    llmControlEnabled: tradingLoopConfig.llmControlEnabled,
+    defaultIntervalMinutes: tradingLoopConfig.defaultIntervalMinutes,
+    activeIntervalMinutes,
+    nextRunAt: nextScheduledExecutionAt
+      ? new Date(nextScheduledExecutionAt).toISOString()
+      : null,
+  };
 }
 
 async function ensurePositionsColumns() {
@@ -1604,9 +1669,7 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
     const minutesElapsed = Math.floor(
       (Date.now() - tradingStartTime.getTime()) / 60000,
     );
-    const intervalMinutes = Number.parseInt(
-      process.env.TRADING_INTERVAL_MINUTES || "5",
-    );
+    const intervalMinutes = activeLoopIntervalMinutes;
 
     logger.info(`\n${"=".repeat(80)}`);
     logger.info(`交易周期 #${iterationCount} (运行${minutesElapsed}分钟)`);
@@ -2346,33 +2409,39 @@ export async function initTradingSystem() {
  * 启动交易循环
  */
 export function startTradingLoop() {
-  const intervalMinutes = Number.parseInt(
-    process.env.TRADING_INTERVAL_MINUTES || "5"
-  );
-  const intervalMs = intervalMinutes * 60 * 1000;
+  const intervalMinutes = tradingLoopConfig.defaultIntervalMinutes;
   
-  logger.info(`启动交易循环，间隔: ${intervalMinutes} 分钟`);
+  logger.info(`启动交易循环，默认间隔: ${intervalMinutes} 分钟`);
   logger.info(`支持币种: ${SYMBOLS.join(", ")}`);
   const exchangeId = getActiveExchangeId();
   logger.info(`当前交易所: ${exchangeId}${isDryRunMode() ? " (dry-run)" : ""}`);
   if (isDryRunMode()) {
     logger.warn("⚠️  Dry-Run 模式正在运行：所有订单将仅在本地模拟，不会触发真实交易。");
   }
+  if (tradingLoopConfig.llmControlEnabled) {
+    logger.info(
+      `LLM 动态调度已开启：允许在 ${tradingLoopConfig.llmMinIntervalMinutes}-${tradingLoopConfig.llmMaxIntervalMinutes} 分钟之间调整下一次循环。`,
+    );
+  } else {
+    logger.info("LLM 动态调度未开启：始终按固定间隔运行。");
+  }
+  
+  registerTradingLoopRescheduleHandler((reason) => {
+    if (!tradingLoopConfig.llmControlEnabled) {
+      return;
+    }
+    if (!loopSchedulerInitialized) {
+      logger.warn("收到 LLM 调度请求但定时器尚未初始化，稍后会自动执行。");
+      return;
+    }
+    logger.info("收到 LLM 调度请求，重新安排下一次交易循环。");
+    scheduleNextTradingRun(reason);
+  });
   
   // 立即执行一次，视为定时调度触发，用于初始化 next run
   lastScheduledExecutionAt = Date.now();
-  nextScheduledExecutionAt = lastScheduledExecutionAt + intervalMs;
   executeTradingDecision({ trigger: "scheduled" });
-  
-  // 设置定时任务
-  const cronExpression = `*/${intervalMinutes} * * * *`;
-  cron.schedule(cronExpression, () => {
-    lastScheduledExecutionAt = Date.now();
-    nextScheduledExecutionAt = lastScheduledExecutionAt + intervalMs;
-    executeTradingDecision({ trigger: "scheduled" });
-  });
-  
-  logger.info(`定时任务已设置: ${cronExpression}`);
+  scheduleNextTradingRun("initial");
 
   if (marketPulseConfig.enabled) {
     startMarketPulseWatcher((event) => {

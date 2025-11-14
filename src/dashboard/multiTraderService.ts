@@ -23,6 +23,8 @@ type TraderAccount = {
   timestamp: string;
   accountStartAt?: string | null;
   tradingIntervalMinutes?: number;
+  llmLoopControlEnabled?: boolean;
+  nextTradingRunAt?: string | null;
 };
 
 export type NodeSnapshot = {

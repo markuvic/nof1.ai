@@ -27,6 +27,8 @@ import { normalizeAccountSnapshot } from "../services/accountMetrics";
 import { createPinoLogger } from "@voltagent/logger";
 import { getCachedQuantReports } from "../services/quantReport";
 import { getTraderIdentity } from "../config/traderProfile";
+import { getTradingLoopConfig } from "../config/tradingLoop";
+import { getTradingLoopRuntimeInfo } from "../scheduler/tradingLoop";
 
 const logger = createPinoLogger({
   name: "api-routes",
@@ -38,6 +40,7 @@ const dbClient = createClient({
 });
 
 const serverStartedAt = new Date();
+const tradingLoopConfig = getTradingLoopConfig();
 
 export function createApiRoutes() {
   const app = new Hono();
@@ -102,6 +105,9 @@ export function createApiRoutes() {
         : 0;
       
       const { traderName } = getTraderIdentity();
+      const loopRuntime = getTradingLoopRuntimeInfo();
+      const tradingIntervalMinutes =
+        loopRuntime.activeIntervalMinutes || tradingLoopConfig.defaultIntervalMinutes;
 
       return c.json({
         traderName,
@@ -112,10 +118,11 @@ export function createApiRoutes() {
         returnPercent,  // 收益率（不包含未实现盈亏）
         initialBalance,
         accountStartAt,
-        tradingIntervalMinutes: Number.parseInt(
-          process.env.TRADING_INTERVAL_MINUTES || "5",
-          10,
-        ),
+        tradingIntervalMinutes,
+        llmLoopControlEnabled: loopRuntime.llmControlEnabled,
+        nextTradingRunAt: loopRuntime.llmControlEnabled
+          ? loopRuntime.nextRunAt
+          : undefined,
         timestamp: new Date().toISOString(),
       });
     } catch (error: any) {

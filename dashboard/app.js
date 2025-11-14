@@ -92,10 +92,27 @@ function formatUptime(meta, account) {
 
 function formatInterval(account) {
   const interval = Number(account?.tradingIntervalMinutes);
-  if (!Number.isFinite(interval) || interval <= 0) {
-    return "交易周期：未知";
+  const hasInterval = Number.isFinite(interval) && interval > 0;
+  const baseLabel = hasInterval
+    ? `交易周期：${interval} 分钟/轮`
+    : "交易周期：未知";
+  if (!account?.llmLoopControlEnabled) {
+    return baseLabel;
   }
-  return `交易周期：${interval} 分钟/轮`;
+  const nextRunRaw = account?.nextTradingRunAt;
+  const nextTimestamp =
+    typeof nextRunRaw === "string" ? Date.parse(nextRunRaw) : NaN;
+  if (Number.isFinite(nextTimestamp)) {
+    const minutesLeft = Math.max(
+      0,
+      Math.round((nextTimestamp - Date.now()) / 60000),
+    );
+    const relative =
+      minutesLeft > 0 ? `${minutesLeft} 分钟后` : "随时";
+    const formattedTime = new Date(nextTimestamp).toLocaleString();
+    return `${baseLabel} · 下一轮：${formattedTime}（${relative}）`;
+  }
+  return `${baseLabel} · 下一轮：待调度`;
 }
 
 function renderTotals() {
