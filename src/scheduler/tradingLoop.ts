@@ -160,8 +160,8 @@ function scheduleNextTradingRun(reason: string) {
   tradingLoopTimer = setTimeout(() => {
     lastScheduledExecutionAt = Date.now();
     nextScheduledExecutionAt = 0;
-    executeTradingDecision({ trigger: "scheduled" }).finally(() => {
-      scheduleNextTradingRun("auto");
+    executeTradingDecision({ trigger: "scheduled" }).catch((error) => {
+      logger.error("定时调度执行失败:", error as any);
     });
   }, delayMs);
 
