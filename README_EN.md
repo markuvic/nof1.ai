@@ -7,6 +7,7 @@
 [![VoltAgent](https://img.shields.io/badge/Framework-VoltAgent-purple.svg)](https://voltagent.dev)
 [![OpenAI Compatible](https://img.shields.io/badge/AI-OpenAI_Compatible-orange.svg)](https://openrouter.ai)
 [![Gate.io](https://img.shields.io/badge/Exchange-Gate.io-00D4AA.svg)](https://www.gatesite.org/signup/NOFIAIOO?ref_type=103)
+[![OKX](https://img.shields.io/badge/Exchange-OKX-000000.svg)](https://www.okx.com/zh-hans/join/nofiaioo)
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Node.js](https://img.shields.io/badge/Runtime-Node.js%2020+-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
@@ -80,7 +81,7 @@ The system follows a **minimal human intervention** design philosophy, abandonin
 |-----------|-----------|---------|
 | Framework | [VoltAgent](https://voltagent.dev) | AI Agent orchestration and management |
 | AI Provider | OpenAI Compatible API | Supports OpenRouter, OpenAI, DeepSeek and other compatible providers |
-| Exchange | [Gate.io](https://www.gatesite.org/signup/NOFIAIOO?ref_type=103) | Cryptocurrency trading (testnet & mainnet) |
+| Exchange | [Gate.io](https://www.gatesite.org/signup/NOFIAIOO?ref_type=103) / [OKX](https://www.okx.com/zh-hans/join/nofiaioo) | Cryptocurrency trading (testnet & mainnet) |
 | Database | LibSQL (SQLite) | Local data persistence |
 | Web Server | Hono | High-performance HTTP framework |
 | Language | TypeScript | Type-safe development |
@@ -183,10 +184,19 @@ SYNC_CONFIG_ON_STARTUP=true             # Sync config on startup
 # Database
 DATABASE_URL=file:./.voltagent/trading.db
 
+# Exchange Selection (gate/okx, default: gate)
+EXCHANGE=gate
+
 # Gate.io API Credentials (use testnet first!)
 GATE_API_KEY=your_api_key_here
 GATE_API_SECRET=your_api_secret_here
 GATE_USE_TESTNET=true
+
+# OKX API Credentials (required when EXCHANGE=okx)
+OKX_API_KEY=
+OKX_API_SECRET=
+OKX_API_PASSPHRASE=
+OKX_USE_TESTNET=true
 
 # Manual Close Position Password (for web interface)
 CLOSE_POSITION_PASSWORD=
@@ -211,8 +221,7 @@ ACCOUNT_RECORD_INTERVAL_MINUTES=1             # Account record interval
 - DeepSeek: https://platform.deepseek.com/api_keys
 - Gate.io Testnet: https://testnet.gate.com
 - Gate.io Mainnet: https://www.gatesite.org/signup/NOFIAIOO?ref_type=103
-
-> **Tip**: Register a Gate.io account using the above referral link or invitation code `NOFIAIOO` to receive commission rebates on your trades.
+- OKX Exchange: https://www.okx.com/zh-hans/join/nofiaioo
 
 ### Database Initialization
 
@@ -318,9 +327,14 @@ nof1.ai/
 | `ACCOUNT_TAKE_PROFIT_USDT` | Account take profit line (USDT) | 20000 | No |
 | `SYNC_CONFIG_ON_STARTUP` | Sync config on startup | true | No |
 | `DATABASE_URL` | SQLite database file path | file:./.voltagent/trading.db | No |
-| `GATE_API_KEY` | Gate.io API key | - | Yes |
-| `GATE_API_SECRET` | Gate.io API secret | - | Yes |
-| `GATE_USE_TESTNET` | Use testnet environment | true | No |
+| `EXCHANGE` | Exchange to use (`gate`/`okx`) | gate | No |
+| `GATE_API_KEY` | Gate.io API key | - | Yes (when EXCHANGE=gate) |
+| `GATE_API_SECRET` | Gate.io API secret | - | Yes (when EXCHANGE=gate) |
+| `GATE_USE_TESTNET` | Use Gate.io testnet environment | true | No |
+| `OKX_API_KEY` | OKX API key | - | Yes (when EXCHANGE=okx) |
+| `OKX_API_SECRET` | OKX API secret | - | Yes (when EXCHANGE=okx) |
+| `OKX_API_PASSPHRASE` | OKX API passphrase | - | Yes (when EXCHANGE=okx) |
+| `OKX_USE_TESTNET` | Use OKX testnet environment | true | No |
 | `CLOSE_POSITION_PASSWORD` | Password for manual close position in web interface | - | Yes |
 | `OPENAI_API_KEY` | OpenAI compatible API key | - | Yes |
 | `OPENAI_BASE_URL` | API base URL | https://openrouter.ai/api/v1 | No |
@@ -787,10 +801,18 @@ cp .voltagent/trading.db "$backup_dir/trading-$(date +%Y%m%d-%H%M%S).db"
 # 2. Edit .env file
 nano .env
 
-# 3. Update configuration
+# 3. Update configuration for Gate.io
+EXCHANGE=gate
 GATE_USE_TESTNET=false
 GATE_API_KEY=your_mainnet_api_key
 GATE_API_SECRET=your_mainnet_api_secret
+
+# Or update configuration for OKX
+EXCHANGE=okx
+OKX_USE_TESTNET=false
+OKX_API_KEY=your_okx_mainnet_api_key
+OKX_API_SECRET=your_okx_mainnet_api_secret
+OKX_API_PASSPHRASE=your_okx_passphrase
 
 # 4. Restart system
 npm run trading:start
@@ -798,16 +820,25 @@ npm run trading:start
 
 ## Resources
 
-### Support Continuous Project Development
+### Community
 
-If you don't have a Gate.io account yet, we recommend registering through this referral:
+- **Telegram Group**: [Join AI Agent Learning Community](https://t.me/+E7av1nVEk5E1ZjY9)
+  - Discuss AI quantitative trading strategies
+  - Share project experience
+  - Get technical support and advice
+
+### 🎁 Trading Rebate & Community Benefits
+
+**Gate.io Exchange (Recommended)**
+
+If you don't have a Gate.io account yet, you can register through our referral:
 
 - **Referral Link**: [https://www.gatesite.org/signup/NOFIAIOO?ref_type=103](https://www.gatesite.org/signup/NOFIAIOO?ref_type=103)
 - **Invitation Code**: `NOFIAIOO`
 
-> By registering with the referral code, you'll receive trading commission rebates while helping maintain this open-source project's long-term operation. It benefits both you and the project, completely free with no extra costs.
+Join our [Telegram Group](https://t.me/+E7av1nVEk5E1ZjY9) to get **60% fee rebate** and other community benefits.
 
-> **Tip**: Testnet and mainnet can use the same account. We recommend thorough testing on testnet before real trading.
+> **Tip**: Gate.io testnet and mainnet can use the same account. We recommend thorough testing on testnet before real trading.
 
 ### External Links
 
@@ -817,6 +848,8 @@ If you don't have a Gate.io account yet, we recommend registering through this r
 - [DeepSeek API Documentation](https://platform.deepseek.com/api-docs/)
 - [Gate.io API Reference](https://www.gate.io/docs/developers/apiv4/)
 - [Gate.io Testnet](https://testnet.gate.com)
+- [OKX API Reference](https://www.okx.com/docs-v5/en/)
+- [OKX Exchange](https://www.okx.com/zh-hans/join/nofiaioo)
 
 ## Risk Disclaimer
 

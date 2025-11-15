@@ -21,7 +21,7 @@
  */
 
 import { createLogger } from "../utils/loggerUtils";
-import { createGateClient } from "./gateClient";
+import { createExchangeClient } from "./exchangeClient";
 
 const logger = createLogger({
   name: "multi-timeframe",
@@ -209,11 +209,11 @@ export async function analyzeTimeframe(
   symbol: string,
   config: TimeframeConfig
 ): Promise<TimeframeIndicators> {
-  const gateClient = createGateClient();
+  const exchangeClient = createExchangeClient();
   const contract = `${symbol}_USDT`;
   
   // 获取K线数据
-  const candles = await gateClient.getFuturesCandles(
+  const candles = await exchangeClient.getFuturesCandles(
     contract,
     config.interval,
     config.candleCount

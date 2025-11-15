@@ -23,7 +23,7 @@
 import cron from "node-cron";
 import { createLogger } from "../utils/loggerUtils";
 import { createClient } from "@libsql/client";
-import { createGateClient } from "../services/gateClient";
+import { createExchangeClient } from "../services/exchangeClient";
 import { getChinaTimeISO } from "../utils/timeUtils";
 
 const logger = createLogger({
@@ -42,10 +42,10 @@ const dbClient = createClient({
  */
 export async function recordAccountAssets(skipLog: boolean = false) {
   try {
-    const gateClient = createGateClient();
+    const exchangeClient = createExchangeClient();
     
     // Get account information from Gate.io
-    const account = await gateClient.getFuturesAccount();
+    const account = await exchangeClient.getFuturesAccount();
     
     // Extract account data
     // Gate.io 的 account.total 不包含未实现盈亏

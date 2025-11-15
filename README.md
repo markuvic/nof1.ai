@@ -5,6 +5,7 @@
 [![VoltAgent](https://img.shields.io/badge/Framework-VoltAgent-purple.svg)](https://voltagent.dev)
 [![OpenAI Compatible](https://img.shields.io/badge/AI-OpenAI_Compatible-orange.svg)](https://openrouter.ai)
 [![Gate.io](https://img.shields.io/badge/Exchange-Gate.io-00D4AA.svg)](https://www.gatesite.org/signup/NOFIAIOO?ref_type=103)
+[![OKX](https://img.shields.io/badge/Exchange-OKX-000000.svg)](https://www.okx.com/zh-hans/join/nofiaioo)
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Node.js](https://img.shields.io/badge/Runtime-Node.js%2020+-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
@@ -62,7 +63,7 @@ open-nof1.ai 是一个 AI 驱动的加密货币自动交易系统，将大语言
 |------|------|------|
 | 框架 | [VoltAgent](https://voltagent.dev) | AI Agent 编排与管理 |
 | AI 提供商 | OpenAI 兼容 API | 支持 OpenRouter、OpenAI、DeepSeek 等兼容供应商 |
-| 交易所 | [Gate.io](https://www.gatesite.org/signup/NOFIAIOO?ref_type=103) | 加密货币交易(测试网 & 正式网) |
+| 交易所 | [Gate.io](https://www.gatesite.org/signup/NOFIAIOO?ref_type=103) / [OKX](https://www.okx.com/zh-hans/join/nofiaioo) | 加密货币交易(测试网 & 正式网) |
 | 数据库 | LibSQL (SQLite) | 本地数据持久化 |
 | Web 服务器 | Hono | 高性能 HTTP 框架 |
 | 开发语言 | TypeScript | 类型安全开发 |
@@ -72,16 +73,19 @@ open-nof1.ai 是一个 AI 驱动的加密货币自动交易系统，将大语言
 
 ### 第一步：注册交易所账户
 
-本项目依赖 Gate.io 交易所 API。**如果您还没有账户，请先完成注册：**
+本项目依赖交易所 API。**如果您还没有账户，请先完成注册：**
 
 **推荐注册方式：**
 
+**🔥 Gate.io 交易所（推荐）**
 - [立即注册 Gate.io](https://www.gatesite.org/signup/NOFIAIOO?ref_type=103)
 - 邀请码：`NOFIAIOO`
 
-> 通过上方邀请码注册，您可享受交易返佣优惠，同时为开源项目的持续发展提供支持。
+**OKX 交易所**
+- [立即注册 OKX](https://www.okx.com/zh-hans/join/nofiaioo)
+- 邀请码：`NOFIAIOO`
 
-> **新手建议**：先注册并使用[测试网](https://testnet.gate.com/)环境学习，零风险体验完整功能。
+> **新手建议**：先注册并使用 [Gate.io 测试网](https://testnet.gate.com/)环境学习，零风险体验完整功能。
 
 ### 第二步：环境准备
 
@@ -123,10 +127,19 @@ SYNC_CONFIG_ON_STARTUP=true             # 启动时同步配置
 # 数据库
 DATABASE_URL=file:./.voltagent/trading.db
 
+# 交易所选择（gate/okx，默认: gate）
+EXCHANGE=gate
+
 # Gate.io API 凭证(建议先使用测试网!)
 GATE_API_KEY=your_api_key_here
 GATE_API_SECRET=your_api_secret_here
 GATE_USE_TESTNET=true
+
+# OKX API 凭证（当 EXCHANGE=okx 时需要配置）
+OKX_API_KEY=
+OKX_API_SECRET=
+OKX_API_PASSPHRASE=
+OKX_USE_TESTNET=true
 
 # 手动平仓密码（用于网页界面平仓功能）
 CLOSE_POSITION_PASSWORD=
@@ -152,8 +165,53 @@ ACCOUNT_RECORD_INTERVAL_MINUTES=1            # 账户记录间隔
 - DeepSeek: https://platform.deepseek.com/api_keys
 - Gate.io 测试网: https://testnet.gate.com
 - Gate.io 正式网: https://www.gatesite.org/signup/NOFIAIOO?ref_type=103
+- OKX 交易所: https://www.okx.com/zh-hans/join/nofiaioo
 
-> **提示**: 通过上方邀请链接或使用邀请码 `NOFIAIOO` 注册 Gate.io 账户，您将获得交易佣金返还优惠。
+### 环境变量说明
+
+配置文件 `.env` 中的关键参数说明：
+
+**交易参数配置：**
+- `TRADING_STRATEGY`: 交易策略选择，影响开仓频率和风险控制
+- `TRADING_INTERVAL_MINUTES`: 每次交易循环的间隔时间，越短越频繁
+- `MAX_LEVERAGE`: 最大杠杆倍数，建议新手使用 3-5 倍
+- `MAX_POSITIONS`: 同时持有的最大仓位数量，用于分散风险
+- `MAX_HOLDING_HOURS`: 单个仓位的最长持有时间，超时自动平仓
+- `EXTREME_STOP_LOSS_PERCENT`: 极端止损线，防止爆仓的最后防线
+- `INITIAL_BALANCE`: 初始资金设置，用于计算仓位大小
+- `ACCOUNT_STOP_LOSS_USDT`: 账户总资产止损线，触及后停止交易
+- `ACCOUNT_TAKE_PROFIT_USDT`: 账户总资产止盈线，达到后可选择停止
+
+**风险控制参数：**
+- `ACCOUNT_DRAWDOWN_WARNING_PERCENT`: 回撤 20% 时发出警告
+- `ACCOUNT_DRAWDOWN_NO_NEW_POSITION_PERCENT`: 回撤 30% 时禁止开新仓
+- `ACCOUNT_DRAWDOWN_FORCE_CLOSE_PERCENT`: 回撤 50% 时强制平仓保护资金
+
+**数据库配置：**
+- `DATABASE_URL`: 数据库文件路径，存储交易记录和决策日志
+
+**交易所配置：**
+- `EXCHANGE`: 选择使用的交易所（`gate` 或 `okx`，默认: `gate`）
+  - 设置为 `gate` 使用 Gate.io 交易所
+  - 设置为 `okx` 使用 OKX 交易所
+
+**Gate.io API 配置：**
+- `GATE_API_KEY`: Gate.io API 密钥
+- `GATE_API_SECRET`: Gate.io API 密钥
+- `GATE_USE_TESTNET`: 设置为 `true` 使用测试网，`false` 使用正式网
+
+**OKX API 配置：**
+- `OKX_API_KEY`: OKX API 密钥（当 `EXCHANGE=okx` 时必需）
+- `OKX_API_SECRET`: OKX API 密钥（当 `EXCHANGE=okx` 时必需）
+- `OKX_API_PASSPHRASE`: OKX API 口令（当 `EXCHANGE=okx` 时必需）
+- `OKX_USE_TESTNET`: 设置为 `true` 使用测试网，`false` 使用正式网
+
+**其他 API 配置：**
+- `CLOSE_POSITION_PASSWORD`: 网页界面手动平仓的安全密码
+
+> ⚠️ **重要**：
+> - 首次使用请务必在测试网环境测试（`GATE_USE_TESTNET=true` 或 `OKX_USE_TESTNET=true`）！
+> - 切换交易所时，请确保配置对应交易所的 API 密钥
 
 ### 第五步：数据库初始化
 
@@ -243,21 +301,6 @@ npm run trading:start
 
 ## 资源
 
-### 节省交易成本 & 支持项目
-
-如果您还没有 Gate.io 账户，强烈建议通过以下方式注册：
-
-**注册方式：**
-- **邀请链接**: [https://www.gatesite.org/signup/NOFIAIOO?ref_type=103](https://www.gatesite.org/signup/NOFIAIOO?ref_type=103)
-- **邀请码**: `NOFIAIOO`
-
-**双赢方案：**
-- **您的优势**：获得交易手续费返佣，长期使用可节省可观成本
-- **项目支持**：您的使用将帮助维护这个开源项目的持续开发
-- **无额外费用**：完全免费，不影响您的任何交易体验
-
-> **提示**：测试网和正式网可以用同一个账户，建议您先在测试网充分测试后再进行真实交易。
-
 ### 交流社区
 
 - **Telegram 交流群**: [加入 AI Agent 学习交流群](https://t.me/+E7av1nVEk5E1ZjY9)
@@ -265,12 +308,25 @@ npm run trading:start
   - 分享项目使用经验
   - 获取技术支持和建议
 
+### 🎁 交易返佣 & 社群福利
+
+**Gate.io 交易所（推荐）**
+
+如果您还没有 Gate.io 账户，可以通过我们的邀请注册：
+
+- **邀请链接**: [https://www.gatesite.org/signup/NOFIAIOO?ref_type=103](https://www.gatesite.org/signup/NOFIAIOO?ref_type=103)
+- **邀请码**: `NOFIAIOO`
+
+加入 [Telegram 交流群](https://t.me/+E7av1nVEk5E1ZjY9) 获取 **60% 手续费返佣**等社群福利。
+
 ### 外部链接
 
 - [VoltAgent 文档](https://voltagent.dev/docs/)
 - [OpenRouter 模型目录](https://openrouter.ai/models)
 - [Gate.io API 参考](https://www.gate.io/docs/developers/apiv4/)
 - [Gate.io 测试网](https://testnet.gate.com)
+- [OKX API 参考](https://www.okx.com/docs-v5/zh/)
+- [OKX 交易所](https://www.okx.com/zh-hans/join/nofiaioo)
 
 ## 参与贡献
 
