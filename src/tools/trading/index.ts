@@ -48,3 +48,6 @@ export {
   calculateRiskTool,
   syncPositionsTool,
 } from "./accountManagement";
+
+// 低频 Agent 专用工具
+export { setDefenseLevelsTool } from "./lowFrequencyDefense";

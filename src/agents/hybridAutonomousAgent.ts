@@ -62,7 +62,7 @@ export interface HybridPromptInput {
 	tradeHistory?: any[];
 	recentDecisions?: any[];
 	quantReports?: QuantReport[];
-	triggerReason?: "scheduled" | "market-pulse";
+	triggerReason?: "scheduled" | "market-pulse" | "defense-breach";
 	marketPulseEvent?: MarketPulseEvent | null;
 }
 

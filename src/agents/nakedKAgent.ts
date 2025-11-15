@@ -30,7 +30,7 @@ export interface NakedKPromptInput {
 	positions: any[];
 	tradeHistory?: any[];
 	recentDecisions?: any[];
-	triggerReason?: "scheduled" | "market-pulse";
+	triggerReason?: "scheduled" | "market-pulse" | "defense-breach";
 	marketPulseEvent?: MarketPulseEvent | null;
 }
 

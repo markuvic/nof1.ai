@@ -26,7 +26,11 @@ import { createNakedKAgent, generateNakedKPrompt } from "../agents/nakedKAgent";
 import { createHybridAutonomousAgent, generateHybridPrompt } from "../agents/hybridAutonomousAgent";
 import { createHybridAutoNoImageAgent, generateHybridNoImagePrompt } from "../agents/hybridAutoNoImageAgent";
 import { createQuantSignalAgent } from "../agents/quantSignalAgent";
-import { createLowFrequencyAgent, generateLowFrequencyPrompt } from "../agents/lowFrequencyAgent";
+import {
+  createLowFrequencyAgent,
+  generateLowFrequencyPrompt,
+} from "../agents/lowFrequencyAgent";
+import type { DefenseBreachContext } from "../agents/lowFrequencyAgent";
 import {
   createExchangeClient,
   getActiveExchangeId,
@@ -49,10 +53,26 @@ import type { MarketPulseEvent } from "../types/marketPulse";
 import { describeMarketPulseEvent } from "../utils/marketPulseUtils";
 import { notifyMarketPulseTriggered } from "../services/notifier";
 import { getTradingLoopConfig } from "../config/tradingLoop";
+import { getLowFrequencyDefenseConfig } from "../config/lowFrequencyDefense";
 import {
   consumePendingLoopOverride,
   registerTradingLoopRescheduleHandler,
 } from "../services/tradingLoopControl";
+import {
+  listDefenseLevels,
+  deleteDefenseLevels,
+  markDefenseBreach,
+} from "../services/lowFrequencyAgent/defenseLevels";
+import type { DefenseLevelType } from "../services/lowFrequencyAgent/defenseLevels";
+import {
+  LOW_FREQUENCY_PROFILE_ALIASES,
+  NAKED_K_PROFILE_ALIASES,
+  HYBRID_PROFILE_ALIASES,
+  QUANT_HYBRID_PROFILE_ALIASES,
+  QUANT_HYBRID_NO_IMAGE_ALIASES,
+  normalizeAgentProfile,
+  isLowFrequencyAgentProfile,
+} from "../utils/agentProfile";
 
 const logger = createPinoLogger({
   name: "trading-loop",
@@ -68,6 +88,7 @@ const SYMBOLS = [...RISK_PARAMS.TRADING_SYMBOLS] as string[];
 const systemProtectionConfig = getSystemProtectionConfig();
 const marketPulseConfig = getMarketPulseConfig();
 const tradingLoopConfig = getTradingLoopConfig();
+const lowFrequencyDefenseConfig = getLowFrequencyDefenseConfig();
 
 // 交易开始时间
 let tradingStartTime = new Date();
@@ -82,10 +103,14 @@ let activeLoopIntervalMinutes = tradingLoopConfig.defaultIntervalMinutes;
 let tradingLoopTimer: NodeJS.Timeout | null = null;
 let loopSchedulerInitialized = false;
 let skipNextAutoSchedule = false;
+let defenseMonitorTimer: NodeJS.Timeout | null = null;
+let defenseMonitorExecuting = false;
+let lastDefenseDecisionAt = 0;
 
 interface TradingDecisionOptions {
-  trigger?: "scheduled" | "market-pulse";
+  trigger?: "scheduled" | "market-pulse" | "defense-breach";
   marketPulseEvent?: MarketPulseEvent | null;
+  defenseBreachContext?: DefenseBreachContext | null;
 }
 
 function getTimeUntilNextScheduledRunMs(): number {
@@ -1403,6 +1428,257 @@ async function performSystemProtection() {
   }
 }
 
+function extractTickerPrice(ticker: any): number {
+  if (!ticker) {
+    return Number.NaN;
+  }
+  const candidates = [
+    ticker.last,
+    ticker.last_price,
+    ticker.mark_price,
+    ticker.markPrice,
+    ticker.index_price,
+    ticker.price,
+    ticker.close,
+  ];
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null) {
+      continue;
+    }
+    const parsed = Number.parseFloat(
+      typeof candidate === "number" ? candidate.toString() : String(candidate),
+    );
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return Number.NaN;
+}
+
+function isPriceBreached(
+  side: "long" | "short",
+  currentPrice: number,
+  level: number,
+) {
+  if (!Number.isFinite(level) || level <= 0) {
+    return false;
+  }
+  if (side === "long") {
+    return currentPrice <= level;
+  }
+  return currentPrice >= level;
+}
+
+async function triggerDefenseDecision(
+  context: DefenseBreachContext,
+): Promise<boolean> {
+  try {
+    await executeTradingDecision({
+      trigger: "defense-breach",
+      defenseBreachContext: context,
+    });
+    return true;
+  } catch (error) {
+    logger.error(
+      `低频防守点位触发决策失败: ${(error as Error).message}`,
+    );
+    return false;
+  }
+}
+
+function describeBreachLabel(type: DefenseLevelType) {
+  return type === "entry" ? "入场失效价" : "趋势结构失效价";
+}
+
+async function handleDefenseBreachContext(
+  context: DefenseBreachContext,
+  breachType: DefenseLevelType,
+): Promise<boolean> {
+  const now = Date.now();
+  const cooldown = lowFrequencyDefenseConfig.forceDecisionCooldownMs;
+  if (
+    cooldown > 0 &&
+    now - lastDefenseDecisionAt < cooldown
+  ) {
+    const remaining = Math.max(0, cooldown - (now - lastDefenseDecisionAt));
+    logger.warn(
+      `[低频防守点位] ${
+        context.symbol
+      } ${describeBreachLabel(breachType)} 已被触发，但仍处在 ${Math.ceil(
+        remaining / 1000,
+      )} 秒冷却期，等待下一轮监控。`,
+    );
+    return false;
+  }
+  if (tradingDecisionRunning) {
+    logger.warn(
+      `[低频防守点位] ${
+        context.symbol
+      } ${describeBreachLabel(breachType)} 已触发，但交易循环仍在执行，稍后将再次检测。`,
+    );
+    return false;
+  }
+  logger.warn(
+    `[低频防守点位] ${context.symbol} ${context.side} 仓位的${describeBreachLabel(
+      breachType,
+    )} ${context.levelPrice.toFixed(4)} 已被${
+      context.side === "long" ? "跌破" : "突破"
+    }（当前 ${context.currentPrice.toFixed(4)}），立即触发一次 LLM 决策。`,
+  );
+  const triggered = await triggerDefenseDecision(context);
+  if (triggered) {
+    await markDefenseBreach(context.symbol, breachType);
+    lastDefenseDecisionAt = Date.now();
+  }
+  return triggered;
+}
+
+async function runLowFrequencyDefenseMonitor() {
+  if (!lowFrequencyDefenseConfig.monitoringEnabled) {
+    return;
+  }
+  if (!isLowFrequencyAgentProfile(process.env.AI_AGENT_PROFILE)) {
+    return;
+  }
+  if (defenseMonitorExecuting) {
+    return;
+  }
+  defenseMonitorExecuting = true;
+  try {
+    const defenseRecords = await listDefenseLevels();
+    if (!defenseRecords.length) {
+      return;
+    }
+    const positionsResult = await dbClient.execute(
+      "SELECT symbol, side FROM positions",
+    );
+    const positionMap = new Map<string, "long" | "short">();
+    for (const row of positionsResult.rows as any[]) {
+      const symbol = String(row.symbol ?? "").toUpperCase();
+      if (!symbol) {
+        continue;
+      }
+      const side =
+        String(row.side ?? "").toLowerCase() === "short" ? "short" : "long";
+      positionMap.set(symbol, side);
+    }
+    if (!positionMap.size) {
+      logger.debug(
+        "[低频防守点位] 无持仓，跳过本轮监控。",
+      );
+      return;
+    }
+    const exchangeClient = createExchangeClient();
+    for (const record of defenseRecords) {
+      const symbol = record.symbol.toUpperCase();
+      const positionSide = positionMap.get(symbol);
+      if (!positionSide) {
+        continue;
+      }
+      if (positionSide !== record.side) {
+        await deleteDefenseLevels(symbol);
+        logger.info(
+          `[低频防守点位] ${symbol} 仓位方向已变更为 ${positionSide}，自动清理旧的防守点位。`,
+        );
+        continue;
+      }
+      const needsEntryCheck =
+        !record.entryBreached && record.entryInvalidation > 0;
+      const needsStructureCheck =
+        !record.structureBreached && record.structureInvalidation > 0;
+      if (!needsEntryCheck && !needsStructureCheck) {
+        continue;
+      }
+      let currentPrice = Number.NaN;
+      try {
+        const ticker = await exchangeClient.getFuturesTicker(
+          `${symbol}_USDT`,
+        );
+        currentPrice = extractTickerPrice(ticker);
+      } catch (error) {
+        logger.warn(
+          `[低频防守点位] 获取 ${symbol} 最新价格失败：${
+            (error as Error).message
+          }`,
+        );
+        continue;
+      }
+      if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+        logger.warn(
+          `[低频防守点位] ${symbol} 无法解析有效价格，跳过。`,
+        );
+        continue;
+      }
+      let breachType: DefenseLevelType | null = null;
+      if (
+        needsEntryCheck &&
+        isPriceBreached(record.side, currentPrice, record.entryInvalidation)
+      ) {
+        breachType = "entry";
+      } else if (
+        needsStructureCheck &&
+        isPriceBreached(
+          record.side,
+          currentPrice,
+          record.structureInvalidation,
+        )
+      ) {
+        breachType = "structure";
+      }
+      if (!breachType) {
+        continue;
+      }
+      const context: DefenseBreachContext = {
+        symbol,
+        side: record.side,
+        levelType: breachType,
+        levelPrice:
+          breachType === "entry"
+            ? record.entryInvalidation
+            : record.structureInvalidation,
+        currentPrice,
+      };
+      const handled = await handleDefenseBreachContext(context, breachType);
+      if (handled) {
+        break;
+      }
+    }
+  } catch (error) {
+    logger.error("低频防守点位监控执行失败:", error as any);
+  } finally {
+    defenseMonitorExecuting = false;
+  }
+}
+
+function startLowFrequencyDefenseMonitor() {
+  if (!lowFrequencyDefenseConfig.monitoringEnabled) {
+    logger.info("低频防守点位监控未启用。");
+    return;
+  }
+  if (!isLowFrequencyAgentProfile(process.env.AI_AGENT_PROFILE)) {
+    logger.info("当前 Agent 非低频模式，跳过防守点位监控。");
+    return;
+  }
+  const interval = Math.max(lowFrequencyDefenseConfig.checkIntervalMs, 1000);
+  if (defenseMonitorTimer) {
+    clearInterval(defenseMonitorTimer);
+  }
+  const runner = () => {
+    runLowFrequencyDefenseMonitor().catch((error) => {
+      logger.error("低频防守点位监控异常:", error as any);
+    });
+  };
+  runner();
+  defenseMonitorTimer = setInterval(runner, interval);
+  logger.info(
+    `低频防守点位监控已启用：每 ${Math.round(
+      interval / 1000,
+    )} 秒检查一次，决策冷却 ${Math.round(
+      lowFrequencyDefenseConfig.forceDecisionCooldownMs / 1000,
+    )} 秒。`,
+  );
+}
+
 /**
  * 获取历史成交记录（最近10条）
  * 从数据库获取历史交易记录（监控页的交易历史）
@@ -1693,6 +1969,7 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
   tradingDecisionRunning = true;
   const trigger = options.trigger ?? "scheduled";
   const marketPulseEvent = options.marketPulseEvent ?? null;
+  const defenseBreachContext = options.defenseBreachContext ?? null;
 
   const performCycle = async () => {
     iterationCount++;
@@ -1703,27 +1980,41 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
 
     logger.info(`\n${"=".repeat(80)}`);
     logger.info(`交易周期 #${iterationCount} (运行${minutesElapsed}分钟)`);
-    logger.info(
-      `触发原因：${
-        trigger === "market-pulse" ? "市场脉冲" : "定时调度"
-      }`,
-    );
+    const triggerLabel =
+      trigger === "market-pulse"
+        ? "市场脉冲"
+        : trigger === "defense-breach"
+          ? "系统级防守点位突破"
+          : "定时调度";
+    logger.info(`触发原因：${triggerLabel}`);
     if (marketPulseEvent) {
       const summary = describeMarketPulseEvent(marketPulseEvent);
       if (summary) {
         logger.info(summary);
       }
     }
+    if (defenseBreachContext) {
+      logger.warn(
+        `[系统防守点位] ${defenseBreachContext.symbol} ${
+          defenseBreachContext.side
+        } 仓位的${
+          defenseBreachContext.levelType === "entry"
+            ? "入场失效价"
+            : "趋势结构失效价"
+        } ${defenseBreachContext.levelPrice.toFixed(4)} 已被${
+          defenseBreachContext.side === "long" ? "跌破" : "突破"
+        }（当前 ${defenseBreachContext.currentPrice.toFixed(4)}）。`,
+      );
+    }
     logger.info(`${"=".repeat(80)}\n`);
 
   const agentProfileRaw = process.env.AI_AGENT_PROFILE || "default";
-  const agentProfile = agentProfileRaw.trim().toLowerCase();
-  const normalizedProfile = agentProfile.replace(/[\s_]+/g, "-");
-  const useNakedKAgent = ["naked-k", "nakedk", "naked"].includes(normalizedProfile);
-  const useLowFrequencyAgent = ["low-frequency", "lowfreq", "low-frequency-agent", "swing", "swing-agent"].includes(normalizedProfile);
-  const useHybridAgent = ["hybrid", "hybrid-agent", "hybrid-autonomous", "hybrid-autonomous-agent", "hybridautonomous", "hybridagent"].includes(normalizedProfile);
-  const useQuantHybridAgent = ["quant-hybrid", "hybrid-quant", "quant", "quant-agent"].includes(normalizedProfile);
-  const useQuantHybridNoImageAgent = ["quant-hybrid-no-image", "hybrid-quant-no-image"].includes(normalizedProfile);
+  const normalizedProfile = normalizeAgentProfile(agentProfileRaw);
+  const useNakedKAgent = NAKED_K_PROFILE_ALIASES.includes(normalizedProfile);
+  const useLowFrequencyAgent = LOW_FREQUENCY_PROFILE_ALIASES.includes(normalizedProfile);
+  const useHybridAgent = HYBRID_PROFILE_ALIASES.includes(normalizedProfile);
+  const useQuantHybridAgent = QUANT_HYBRID_PROFILE_ALIASES.includes(normalizedProfile);
+  const useQuantHybridNoImageAgent = QUANT_HYBRID_NO_IMAGE_ALIASES.includes(normalizedProfile);
   const runHybridAgent = useHybridAgent || useQuantHybridAgent || useQuantHybridNoImageAgent;
   logger.info(`当前 AI Agent Profile: ${normalizedProfile}`);
   if (useQuantHybridAgent) {
@@ -2200,7 +2491,7 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
             marketPulseEvent,
           })
         : useLowFrequencyAgent
-          ? generateLowFrequencyPrompt({
+        ? generateLowFrequencyPrompt({
             accountInfo,
             positions,
             dataset: lowFrequencyDataset!,
@@ -2209,6 +2500,7 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
             intervalMinutes,
             triggerReason: trigger,
             marketPulseEvent,
+            defenseBreachContext,
           })
           : generateTradingPrompt({
             minutesElapsed,
@@ -2529,6 +2821,8 @@ export function startTradingLoop() {
   } else {
     logger.info("系统止盈止损未启用。");
   }
+
+  startLowFrequencyDefenseMonitor();
 }
 
 /**

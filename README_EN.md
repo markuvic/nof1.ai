@@ -344,6 +344,12 @@ open-nof1.ai/
 | `ACCOUNT_DRAWDOWN_WARNING_PERCENT` | Account drawdown warning threshold: triggers risk alert (%) | 20 | No |
 | `ACCOUNT_DRAWDOWN_NO_NEW_POSITION_PERCENT` | Drawdown threshold to stop opening new positions, only allow closing (%) | 30 | No |
 | `ACCOUNT_DRAWDOWN_FORCE_CLOSE_PERCENT` | Drawdown threshold to force close all positions to protect remaining funds (%) | 50 | No |
+| `LOW_FREQ_DEFENSE_TOOL_ENABLED` | Allow the low-frequency agent to expose the defense-level tool | true | No |
+| `LOW_FREQ_DEFENSE_MONITOR_ENABLED` | Enable system-level defense monitoring for the low-frequency agent | true | No |
+| `LOW_FREQ_DEFENSE_MONITOR_INTERVAL_MS` | Polling interval (ms) for defense-level breach checks | 10000 | No |
+| `LOW_FREQ_DEFENSE_FORCE_DECISION_COOLDOWN_MS` | Minimum cool-down (ms) between forced decisions caused by breaches | 60000 | No |
+
+> When `AI_AGENT_PROFILE=low-frequency`, the LLM can call `setDefenseLevels` to submit `entry_invalidation` and `structure_invalidation`. The runtime monitors these levels at the configured cadence and, once breached, forces a fresh LLM decision while injecting an alert that the system-level defense line has been broken.
 
 ### AI Model Configuration
 

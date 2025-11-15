@@ -16,6 +16,7 @@ import * as tradingTools from "../tools/trading";
 import type { MarketPulseEvent } from "../types/marketPulse";
 import { describeMarketPulseEvent } from "../utils/marketPulseUtils";
 import { formatChinaTime } from "../utils/timeUtils";
+import type { DefenseLevelType } from "../services/lowFrequencyAgent/defenseLevels";
 
 const logger = createPinoLogger({
 	name: "low-frequency-agent",
@@ -78,8 +79,17 @@ export interface LowFrequencyPromptInput {
 	iteration: number;
 	minutesElapsed: number;
 	intervalMinutes: number;
-	triggerReason?: "scheduled" | "market-pulse";
+	triggerReason?: "scheduled" | "market-pulse" | "defense-breach";
 	marketPulseEvent?: MarketPulseEvent | null;
+	defenseBreachContext?: DefenseBreachContext | null;
+}
+
+export interface DefenseBreachContext {
+	symbol: string;
+	side: "long" | "short";
+	levelType: DefenseLevelType;
+	levelPrice: number;
+	currentPrice: number;
 }
 
 function loadTemplate(templatePath: string): string {
@@ -213,6 +223,8 @@ function renderLowFrequencyUserPrompt(context: {
 	} = context;
 
 	const { llmControlEnabled } = getTradingLoopConfig();
+	const alignFixedInterval =
+		process.env.TRADING_LOOP_ALIGN_TO_INTERVAL === "true";
 	const lines: string[] = [];
 	lines.push("---------------------------","");
 	lines.push("本周期执行信息", "");
@@ -404,6 +416,12 @@ function renderLowFrequencyUserPrompt(context: {
 	} else {
 		lines.push("---------------------------");
 	}
+	if(alignFixedInterval){
+		lines.push(
+			"如果进行了开仓，你必须在开仓后，调用工具设置交易对突破点位",
+			"---------------------------",
+		);
+	}
 
 	return lines.join("\n");
 }
@@ -420,6 +438,7 @@ export function generateLowFrequencyPrompt(
 		intervalMinutes,
 		triggerReason = "scheduled",
 		marketPulseEvent = null,
+		defenseBreachContext = null,
 	} = input;
 
 	const account = buildPromptAccount(accountInfo);
@@ -430,7 +449,12 @@ export function generateLowFrequencyPrompt(
 	const triggerNote = market_pulse_trigger
 		? (pulseSummary ?? "⚡ 市场脉冲触发，本轮为提前执行。")
 		: "常规调度执行。";
-	const extendedContext = `${triggerNote}\n执行迭代 #${iteration}，系统已运行 ${minutesElapsed} 分钟（周期 ${intervalMinutes} 分钟）。`;
+	const breachNote = defenseBreachContext
+		? `⚠️ 系统级防守点位被突破：${defenseBreachContext.symbol} ${defenseBreachContext.side === "long" ? "多头" : "空头"} 的${defenseBreachContext.levelType === "entry" ? "入场失效价" : "趋势结构失效价"} (${defenseBreachContext.levelPrice.toFixed(4)}) 已被${defenseBreachContext.side === "long" ? "跌破" : "突破"}，最新价 ${defenseBreachContext.currentPrice.toFixed(4)}。`
+		: "";
+	const extendedContext = `${triggerNote}\n执行迭代 #${iteration}，系统已运行 ${minutesElapsed} 分钟（周期 ${intervalMinutes} 分钟）。${
+		breachNote ? `\n${breachNote}` : ""
+	}`;
 
 	return renderLowFrequencyUserPrompt({
 		timestamp: currentTime,
@@ -448,12 +472,14 @@ export function generateLowFrequencyPrompt(
 
 function getSystemPrompt(intervalMinutes=60):string{
 	const { llmControlEnabled } = getTradingLoopConfig();
+	const alignFixedInterval =
+		process.env.TRADING_LOOP_ALIGN_TO_INTERVAL === "true"
 	return `
 --------
 你是一名世界级的职业加密货币交易员与市场分析师。你的所有判断基于客观数据、结构与概率，而非固定策略。
 你每 1 小时收到一次 最新市场数据，并需要做出独立的、专业的交易决策。
 你可以使用工具（tool call）：
-openPosition, closePosition, getPositions, getAccountBalance, getMarketPrice, getOrderBook。
+openPosition, closePosition, getPositions, getAccountBalance, getMarketPrice, getOrderBook,setDefenseLevels。
 如果你认为本周期没有足够好的信号，你可以选择 不调用任何工具，即“观望”。
 --------
 【你的核心交易原则】
@@ -574,7 +600,21 @@ K 线结构已按 最旧 → 最新 排列。
  . 避免在日线大阻力位直接开多
  . 避免在日线大支撑位直接开空
  . 避免在极低波动区间操作（量能死寂）
---------
+
+${alignFixedInterval ? `--------
+*重要*【开仓行为要求】
+
+在你决定开仓时，你必须在开仓后，调用setDefenseLevels工具，设置：
+1. entry_invalidation（入场结构失效价）
+2. structure_invalidation（趋势结构失效价）
+
+提供规则：
+- entry_invalidation：来自小周期（15m/1h）最近结构失败位
+- structure_invalidation：来自中大周期（1h/4h/1d）趋势结构破坏位
+
+这两个价位必须合理，并基于你的分析清晰说明为什么选择这些位置。
+开仓后系统将实时监控这些价位，一旦触发，你将被立即唤醒重新决策。
+--------`:`--------`}
 
 【平仓的必要条件】
 你可以自主执行平仓：
@@ -708,6 +748,7 @@ export function createLowFrequencyAgent(intervalMinutes = 60) {
 			tradingTools.getPositionsTool,
 			tradingTools.openPositionTool,
 			tradingTools.closePositionTool,
+			tradingTools.setDefenseLevelsTool,
 			tradingTools.setNextTradingCycleIntervalTool,
 		],
 		memory,

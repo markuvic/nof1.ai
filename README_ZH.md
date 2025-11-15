@@ -325,6 +325,12 @@ open-nof1.ai/
 | `ACCOUNT_DRAWDOWN_WARNING_PERCENT` | 账户回撤警告阈值：发出风险警告提醒(%) | 20 | 否 |
 | `ACCOUNT_DRAWDOWN_NO_NEW_POSITION_PERCENT` | 禁止开仓阈值：停止开新仓位，只允许平仓(%) | 30 | 否 |
 | `ACCOUNT_DRAWDOWN_FORCE_CLOSE_PERCENT` | 强制平仓阈值：自动平掉所有仓位，保护剩余资金(%) | 50 | 否 |
+| `LOW_FREQ_DEFENSE_TOOL_ENABLED` | 是否允许低频 Agent 调用系统级防守点位工具 | true | 否 |
+| `LOW_FREQ_DEFENSE_MONITOR_ENABLED` | 是否开启低频 Agent 的防守点位突破监控 | true | 否 |
+| `LOW_FREQ_DEFENSE_MONITOR_INTERVAL_MS` | 防守点位监控轮询间隔(ms)，建议 ≥ 5000 | 10000 | 否 |
+| `LOW_FREQ_DEFENSE_FORCE_DECISION_COOLDOWN_MS` | 连续两次因点位突破触发决策的冷却时间(ms) | 60000 | 否 |
+
+> **低频 Agent 防守点位说明**：当 `AI_AGENT_PROFILE=low-frequency` 且开启监控时，LLM 可通过 `setDefenseLevels` 工具为每个仓位设置 `entry_invalidation` 与 `structure_invalidation`。系统会按配置的间隔检查最新行情，若点位被突破将强制触发一次 LLM 决策，并在提示词中注入“系统级防守点位已被突破”的提醒。
 
 ### 交易策略说明
 

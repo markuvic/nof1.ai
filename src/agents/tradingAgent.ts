@@ -414,7 +414,7 @@ export function generateTradingPrompt(data: {
 	positions: any[];
 	tradeHistory?: any[];
 	recentDecisions?: any[];
-	triggerReason?: "scheduled" | "market-pulse";
+	triggerReason?: "scheduled" | "market-pulse" | "defense-breach";
 	marketPulseEvent?: MarketPulseEvent | null;
 }): string {
 	const {

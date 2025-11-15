@@ -103,6 +103,18 @@ export interface SystemConfig {
   updated_at: string;
 }
 
+export interface PositionDefenseLevel {
+  symbol: string;
+  side: "long" | "short";
+  entry_invalidation: number;
+  structure_invalidation: number;
+  entry_breached: number;
+  structure_breached: number;
+  last_forced_decision_at?: string;
+  notes?: string;
+  updated_at: string;
+}
+
 /**
  * SQL 建表语句
  */
@@ -197,6 +209,22 @@ CREATE TABLE IF NOT EXISTS system_config (
   value TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- 低频 Agent 防守点位表
+CREATE TABLE IF NOT EXISTS position_defense_levels (
+  symbol TEXT PRIMARY KEY,
+  side TEXT NOT NULL,
+  entry_invalidation REAL NOT NULL,
+  structure_invalidation REAL NOT NULL,
+  entry_breached INTEGER NOT NULL DEFAULT 0,
+  structure_breached INTEGER NOT NULL DEFAULT 0,
+  last_forced_decision_at TEXT,
+  notes TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_position_defense_levels_side
+  ON position_defense_levels(side);
 
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp);
