@@ -8,26 +8,24 @@ import type { LevelWithSilent } from "pino";
 import { RISK_PARAMS } from "../config/riskParams";
 import { getTradingLoopConfig } from "../config/tradingLoop";
 import type {
-	LowFrequencyMarketDataset,
-	MarketEnvironmentSnapshot,
-	PromptCandle,
-} from "../services/lowFrequencyAgent/dataCollector";
+	MidFrequencyMarketDataset,
+	MidFrequencySymbolSnapshot,
+	MidFrequencyTimeframe,
+} from "../services/midFrequencyAgent/dataCollector";
+import type { PromptCandle } from "../services/lowFrequencyAgent/dataCollector";
 import * as tradingTools from "../tools/trading";
 import type { MarketPulseEvent } from "../types/marketPulse";
 import { describeMarketPulseEvent } from "../utils/marketPulseUtils";
 import { formatChinaTime } from "../utils/timeUtils";
-import type { DefenseLevelType } from "../services/lowFrequencyAgent/defenseLevels";
 
 const logger = createPinoLogger({
-	name: "low-frequency-agent",
+	name: "mid-frequency-agent",
 	level: (process.env.LOG_LEVEL || "info") as LevelWithSilent,
 });
 
-const DEFAULT_SYSTEM_TEMPLATE_PATH =
-	process.env.LOW_FREQ_SYSTEM_TEMPLATE_PATH || "system_prompt_template.txt";
+const DEFAULT_SYSTEM_TEMPLATE_PATH = "system_prompt_template.txt";
 const SECTION_SEPARATOR = "⸻";
 const CSV_HEADER = "idx,open,high,low,close,volume";
-
 
 interface PromptAccountSnapshot {
 	balance: number;
@@ -72,24 +70,15 @@ interface RawPositionLike {
 	batchCount?: number | string;
 }
 
-export interface LowFrequencyPromptInput {
+export interface MidFrequencyPromptInput {
 	accountInfo: TradingAccountSnapshot;
 	positions: RawPositionLike[];
-	dataset: LowFrequencyMarketDataset;
+	dataset: MidFrequencyMarketDataset;
 	iteration: number;
 	minutesElapsed: number;
 	intervalMinutes: number;
 	triggerReason?: "scheduled" | "market-pulse" | "defense-breach";
 	marketPulseEvent?: MarketPulseEvent | null;
-	defenseBreachContext?: DefenseBreachContext | null;
-}
-
-export interface DefenseBreachContext {
-	symbol: string;
-	side: "long" | "short";
-	levelType: DefenseLevelType;
-	levelPrice: number;
-	currentPrice: number;
 }
 
 function loadTemplate(templatePath: string): string {
@@ -197,154 +186,117 @@ function formatCandleSeries(candles: PromptCandle[]): string {
 	return rows.join("\n");
 }
 
-function renderLowFrequencyUserPrompt(context: {
+function renderSymbolSection(
+	symbol: string,
+	data: MidFrequencySymbolSnapshot,
+): string {
+	const lines: string[] = [];
+	lines.push(`[${symbol}]`);
+	lines.push(`current_price: ${data.currentPrice.toFixed(4)}`);
+	lines.push("funding_rate:");
+	lines.push(`  now: ${(data.fundingRate.now * 100).toFixed(4)}%`);
+	lines.push(`  8h_avg: ${(data.fundingRate.avg8h * 100).toFixed(4)}%`);
+	lines.push("orderbook:");
+	lines.push(`  bid_strength: ${data.orderbook.bid_strength.toFixed(2)}`);
+	lines.push(`  ask_strength: ${data.orderbook.ask_strength.toFixed(2)}`);
+	lines.push("volatility_snapshot:");
+	lines.push(`  volume_now_5m: ${data.volumeSnapshot.volume_now_5m.toFixed(0)}`);
+	lines.push(`  volume_avg_5m: ${data.volumeSnapshot.volume_avg_5m.toFixed(0)}`);
+	lines.push(
+		`  volume_now_15m: ${data.volumeSnapshot.volume_now_15m.toFixed(0)}`,
+	);
+	lines.push(
+		`  volume_avg_15m: ${data.volumeSnapshot.volume_avg_15m.toFixed(0)}`,
+	);
+	lines.push("atr:");
+	lines.push(`  atr_5m: ${data.atr.atr_5m.toFixed(4)}`);
+	lines.push(`  atr_15m: ${data.atr.atr_15m.toFixed(4)}`);
+	lines.push(`  atr_1h: ${data.atr.atr_1h.toFixed(4)}`);
+	lines.push("rsi:");
+	lines.push(`  rsi_7_15m: ${data.rsi.rsi_7_15m.toFixed(2)}`);
+	lines.push(`  rsi_14_1h: ${data.rsi.rsi_14_1h.toFixed(2)}`);
+	lines.push(`  rsi_14_4h: ${data.rsi.rsi_14_4h.toFixed(2)}`);
+	lines.push("macd:");
+	lines.push(`  macd_1h: ${data.macd.macd_1h.toFixed(4)}`);
+	lines.push(`  signal_1h: ${data.macd.signal_1h.toFixed(4)}`);
+	lines.push(`  hist_1h: ${data.macd.hist_1h.toFixed(4)}`);
+	lines.push("trend_summary:");
+	lines.push(`  5m: ${data.trendSummary["5m"]}`);
+	lines.push(`  15m: ${data.trendSummary["15m"]}`);
+	lines.push(`  1h: ${data.trendSummary["1h"]}`);
+	lines.push(`  4h: ${data.trendSummary["4h"]}`);
+
+	const timeframeOrder: MidFrequencyTimeframe[] = ["5m", "15m", "1h", "4h"];
+	for (const tf of timeframeOrder) {
+		const series = formatCandleSeries(data.candles[tf]);
+		lines.push(`${tf} 裸K (${data.candles[tf].length} 根):`);
+		lines.push(series || "无数据");
+	}
+	return lines.join("\n");
+}
+
+function renderMidFrequencyUserPrompt(context: {
 	timestamp: string;
 	account: PromptAccountSnapshot;
 	positions: PromptPositionSnapshot[];
-	marketEnvironment: MarketEnvironmentSnapshot;
+	dataset: MidFrequencyMarketDataset;
 	marketPulseTrigger: boolean;
-	symbols: string[];
-	k: LowFrequencyMarketDataset["k"];
-	indicators: LowFrequencyMarketDataset["indicators"];
-	riskParams: typeof RISK_PARAMS;
-	extraContext: string;
+	iteration: number;
+	minutesElapsed: number;
+	intervalMinutes: number;
+	triggerNote: string;
 }): string {
 	const {
 		timestamp,
 		account,
 		positions,
-		marketEnvironment,
+		dataset,
 		marketPulseTrigger,
-		symbols,
-		k,
-		indicators,
-		riskParams,
-		extraContext,
+		iteration,
+		minutesElapsed,
+		intervalMinutes,
+		triggerNote,
 	} = context;
 
-	const { llmControlEnabled } = getTradingLoopConfig();
-	const alignFixedInterval =
-		process.env.LOW_FREQ_DEFENSE_TOOL_ENABLED === "true";
 	const lines: string[] = [];
-	lines.push("---------------------------","");
-	lines.push("本周期执行信息", "");
-	lines.push(`执行时间：${timestamp}`);
-	lines.push("执行周期：每 1 小时", "");
+	lines.push("【时间与调度】");
 	lines.push(
-		`市场脉冲触发器：${marketPulseTrigger ? "触发（提前执行）" : "未触发"}`,
+		`| 循环 #${iteration} | 已运行 ${minutesElapsed} 分钟 | 周期 ${intervalMinutes} 分钟`,
 	);
-	lines.push(
-
-		"若由行情剧烈波动触发提前执行，此处为 true。",
-
-		"---------------------------",
-
-	);
+	lines.push(triggerNote);
+	lines.push(marketPulseTrigger ? "⚡ 市场脉冲强制触发" : "常规调度");
 	lines.push("【账户状态】");
 	lines.push(`账户净值：${account.balance} USDT`);
 	lines.push(`可用资金：${account.available} USDT`);
 	lines.push(`当前回撤：${account.drawdownPercent}%`);
 	lines.push(`当前持仓数量：${positions.length}`);
-	lines.push(
-		`允许持仓上限：${riskParams.MAX_POSITIONS}`,
 
-		"---------------------------",
-
-	);
-	lines.push("【当前持仓列表】", "");
-	lines.push(positions.length === 0 ? "（当前无任何持仓）" : "", "");
-	for (const position of positions) {
-		lines.push(`▸ ${position.symbol}`);
-		lines.push(`方向：${position.side}`);
-		lines.push(`开仓价：${position.entryPrice}`);
-		lines.push(`当前价：${position.marketPrice}`);
-		lines.push(`盈亏：${position.pnlPercent}%`);
-		lines.push(`峰值盈利（peak）：${position.peakPnlPercent}%`);
-		lines.push(`持仓时长：${position.holdHours} 小时`);
-		lines.push(`杠杆：${position.leverage}x`);
-		lines.push(
-			`批次：${position.batchCount}（加仓次数：${position.batchCount - 1}）`,
-		);
-		lines.push("");
-	}
-	lines.push(
-		"---------------------------",
-		"【市场环境标签（全局）】",
-		`波动率：${marketEnvironment.volatility}`,
-		`趋势环境：${marketEnvironment.trendEnvironment}`,
-		`BTC 主导地位：${marketEnvironment.btcDominance}`,
-		`资金费率环境：${marketEnvironment.fundingBias}`,
-		`市场脉冲触发：${marketPulseTrigger}`,
-		"---------------------------",
-		"【多交易对市场数据（按交易对逐一提供）】",
-		"所有数据按 最旧 → 最新 排列。",
-		"每个 symbol 都有：15m / 1h / 4h / 1d + 技术指标（精简版）。",
-		"---------------------------",
-		`交易对数量：${symbols.length}`,
-
-		SECTION_SEPARATOR,
-	);
-
-	for (const sym of symbols) {
-		const csv15 = formatCandleSeries(k[sym]["15m"]);
-		const csv1h = formatCandleSeries(k[sym]["1h"]);
-		const csv4h = formatCandleSeries(k[sym]["4h"]);
-		const csv1d = formatCandleSeries(k[sym]["1d"]);
-		const stringify = (value: unknown) => JSON.stringify(value);
-		lines.push(
-	
-			` ${sym}（${sym}）· 多周期行情数据`,
-			"====================================================",
-			"15m 数据",
-			`K线数量：${k[sym]["15m"].length}`,
-			"```csv",
-			csv15 || "(暂无数据)",
-			"```",
-			"技术指标（15m）",
-			"```json",
-			stringify(indicators[sym]["15m"]),
-			"```",
-			"---------------------------",
-			"1h 数据",
-			`K线数量：${k[sym]["1h"].length}`,
-			"```csv",
-			csv1h || "(暂无数据)",
-			"```",
-			"技术指标（1h）",
-			"```json",
-			stringify(indicators[sym]["1h"]),
-			"```",
-			"---------------------------",
-			"4h 数据",
-			`K线数量：${k[sym]["4h"].length}`,
-			"```csv",
-			csv4h || "(暂无数据)",
-			"```",
-			"技术指标（4h）",
-			"```json",
-			stringify(indicators[sym]["4h"]),
-			"```",
-			"---------------------------",
-			"1d 数据",
-			`K线数量：${k[sym]["1d"].length}`,
-			"```csv",
-			csv1d || "(暂无数据)",
-			"```",
-			"技术指标（1d）",
-			"```json",
-			stringify(indicators[sym]["1d"]),
-			"```",
-			"---------------------------",
-		);
+	lines.push("【当前持仓】");
+	if (positions.length === 0) {
+		lines.push("无持仓");
+	} else {
+		for (const pos of positions) {
+			lines.push(
+				`${pos.symbol} ${pos.side} @ ${pos.entryPrice.toFixed(4)} | market ${pos.marketPrice.toFixed(4)} | pnl ${pos.pnlPercent.toFixed(2)}% (peak ${pos.peakPnlPercent.toFixed(2)}%) | hold ${pos.holdHours.toFixed(2)}h | leverage ${pos.leverage}x`,
+			);
+		}
 	}
 
+	lines.push("【多周期裸K + 宏观快照】");
+	for (const symbol of dataset.symbols) {
+		const snapshot = dataset.data[symbol];
+		if (!snapshot) {
+			continue;
+		}
+		lines.push(renderSymbolSection(symbol, snapshot));
+	}
 	lines.push(
 		"【数据说明（LLM 必须遵守）】",
 		"你需要基于 每个币种独立分析趋势、结构与概率。",
 		"---------------------------",
 		"数据包含：",
-		"纯 OHLCV K 线（15m / 1h / 4h / 1d）",
-		"精简技术指标（EMA20/50, MACD, RSI14, Vol/AvgVol）",
+		"纯 OHLCV K 线（5m / 15m / 1h / 4h）",
+		"精简技术指标",
 		"当前持仓与盈亏情况",
 		"全局市场环境（趋势/波动性）",
 		"---------------------------",
@@ -408,26 +360,11 @@ function renderLowFrequencyUserPrompt(context: {
 		"不允许忽略震荡风险",
 		"不允许做模糊判断",
 	);
-	if (llmControlEnabled) {
-		lines.push(
-			"必须在决策完成后调用工具设置下一次执行周期",
-			"---------------------------",
-		);
-	} else {
-		lines.push("---------------------------");
-	}
-	if(alignFixedInterval){
-		lines.push(
-			"如果进行了开仓，你必须在开仓后，调用工具设置交易对突破点位",
-			"---------------------------",
-		);
-	}
-
 	return lines.join("\n");
 }
 
-export function generateLowFrequencyPrompt(
-	input: LowFrequencyPromptInput,
+export function generateMidFrequencyPrompt(
+	input: MidFrequencyPromptInput,
 ): string {
 	const {
 		accountInfo,
@@ -438,7 +375,6 @@ export function generateLowFrequencyPrompt(
 		intervalMinutes,
 		triggerReason = "scheduled",
 		marketPulseEvent = null,
-		defenseBreachContext = null,
 	} = input;
 
 	const account = buildPromptAccount(accountInfo);
@@ -449,35 +385,26 @@ export function generateLowFrequencyPrompt(
 	const triggerNote = market_pulse_trigger
 		? (pulseSummary ?? "⚡ 市场脉冲触发，本轮为提前执行。")
 		: "常规调度执行。";
-	const breachNote = defenseBreachContext
-		? `⚠️ 系统级防守点位被突破：${defenseBreachContext.symbol} ${defenseBreachContext.side === "long" ? "多头" : "空头"} 的${defenseBreachContext.levelType === "entry" ? "入场失效价" : "趋势结构失效价"} (${defenseBreachContext.levelPrice.toFixed(4)}) 已被${defenseBreachContext.side === "long" ? "跌破" : "突破"}，最新价 ${defenseBreachContext.currentPrice.toFixed(4)}。`
-		: "";
-	const extendedContext = `${triggerNote}\n执行迭代 #${iteration}，系统已运行 ${minutesElapsed} 分钟（周期 ${intervalMinutes} 分钟）。${
-		breachNote ? `\n${breachNote}` : ""
-	}`;
 
-	return renderLowFrequencyUserPrompt({
+	return renderMidFrequencyUserPrompt({
 		timestamp: currentTime,
 		account,
 		positions: promptPositions,
-		marketEnvironment: dataset.marketEnvironment,
+		dataset,
 		marketPulseTrigger: market_pulse_trigger,
-		symbols: dataset.symbols,
-		k: dataset.k,
-		indicators: dataset.indicators,
-		riskParams: RISK_PARAMS,
-		extraContext: extendedContext,
+		iteration,
+		minutesElapsed,
+		intervalMinutes,
+		triggerNote,
 	});
 }
 
-function getSystemPrompt(intervalMinutes=60):string{
+function getSystemPrompt(intervalMinutes = 60): string {
 	const { llmControlEnabled } = getTradingLoopConfig();
-	const alignFixedInterval =
-		process.env.LOW_FREQ_DEFENSE_TOOL_ENABLED === "true"
 	return `
 --------
 你是一名世界级的职业加密货币交易员与市场分析师。你的所有判断基于客观数据、结构与概率，而非固定策略。
-你每 1 小时收到一次 最新市场数据，并需要做出独立的、专业的交易决策。
+你每 ${intervalMinutes} 分钟收到一次 最新市场数据，并需要做出独立的、专业的交易决策。
 你可以使用工具（tool call）：
 openPosition, closePosition, getPositions, getAccountBalance, getMarketPrice, getOrderBook,setDefenseLevels。
 如果你认为本周期没有足够好的信号，你可以选择 不调用任何工具，即“观望”。
@@ -496,10 +423,10 @@ openPosition, closePosition, getPositions, getAccountBalance, getMarketPrice, ge
 【你将收到的数据】
 每次你会收到以下内容（由用户提供）：
 1. 多周期 K 线（裸 K）
+ . 5m：最新约 72 根
  . 15m：最新约 48 根
- . 1h：最新约 72 根
- . 4h：最新约 90 根
- . 1d：最新约 60 根
+ . 1h：最新约 48 根
+ . 4h：最新约 42 根
 K 线结构已按 最旧 → 最新 排列。
 
 2. 精简技术指标（仅关键指标）
@@ -535,7 +462,7 @@ K 线结构已按 最旧 → 最新 排列。
 
 【你的任务（必须遵守）】
 你必须对每个交易对执行：
-  1.趋势分析：趋势方向是否明确？（15m / 1h / 4h / 1d）
+  1.趋势分析：趋势方向是否明确？（5m / 15m / 1h / 4h）
   2.结构分析：高低点结构？是否破位？是否假突破？
   3.量能分析：突破是否有效？反弹是否缩量？
   4.反转分析：是否形成顶部/底部结构？吞没？双顶？楔形？通道？
@@ -577,7 +504,7 @@ K 线结构已按 最旧 → 最新 排列。
 
 1. 你不能因为市场整体下跌，就自动认为“做空更优”，不能因为市场整体上升，就自动认为"做多更优"
 2. 你必须让【做多评分】与【做空评分】的计算逻辑完全对称
-3. 如果两边信号强度都弱，你必须观望，而不是偏向空头或偏向多头
+3. 如果两边信号强度都弱，你必须观望，而不是偏向多头或偏向空头
 4. 若市场在底部区间震荡，你必须同时考虑“反转做多”的可能性，若市场在顶部区间震荡，你必须同时考虑“反转做空”的可能性
 5. 你必须明确写出三者评分（long_score / short_score / neutral_score）
 
@@ -600,57 +527,41 @@ K 线结构已按 最旧 → 最新 排列。
 【开仓的必要条件】
 
 开多 or 做空必须满足：
-
-必备条件（全部满足）
- . 趋势在至少 两个周期一致（如：1h + 4h）
- . 有明确结构突破 / 跌破（关键位）
- . 量能配合（突破放量，回调缩量）
- . 不是震荡区间的中段（避免追单）
- . RR >= 2.0（止损与目标具备合理比例）
+（全部必须满足）
+. 至少 两个周期 趋势一致
+（30m决策 → 通常是：15m + 1h 或 1h + 4h）
+. 有明确结构突破 / 跌破
+. 量能配合（突破放量、回调缩量）
+. 不在震荡区间中段（避免追单）
+. RR ≥ 1.5
 
 额外建议（提高胜率）
  . 避免在日线大阻力位直接开多
  . 避免在日线大支撑位直接开空
  . 避免在极低波动区间操作（量能死寂）
 
-${alignFixedInterval ? `--------
-*重要*【开仓行为要求】
-
-在你决定开仓时，你必须在开仓后，调用setDefenseLevels工具，设置：
-1. entry_invalidation（入场结构失效价）
-2. structure_invalidation（趋势结构失效价）
-
-提供规则：
-- entry_invalidation：来自小周期（15m/1h）最近结构失败位
-- structure_invalidation：来自中大周期（1h/4h/1d）趋势结构破坏位
-
-这两个价位必须合理，并基于你的分析清晰说明为什么选择这些位置。
-开仓后系统将实时监控这些价位，一旦触发，你将被立即唤醒重新决策。
---------` : "--------"}
-
 【平仓的必要条件】
-你可以自主执行平仓：
- . 趋势出现明显反转结构
- . 多个周期出现背离
- . 量价出现典型“诱多/诱空”
- . 持仓时间过长且动能衰竭
- . 价格接近强阻力/强支撑
- . RR 变差（目标无法实现）
+你可以自主平仓（如果判断合理）：
+. 趋势出现明显反转
+. 多周期背离
+. 量价出现诱多/诱空
+. 动能衰竭
+. 目标无法达成（RR 恶化）
+. 价格接近强阻力/支撑
+. 盈利回撤超过 30~40%
+若提供 peak_pnl%，你必须综合考虑。
 
-如果用户提供 peak_pnl%，你必须考虑：
- . 如果盈利回撤超过 30~40%，可考虑平仓
- . 若 1h 或 4h 出现趋势反转信号，必须平仓
 --------
 
-【观望的必要条件】
-必须观望的情况：
- . 多周期信号分歧（比如 15m 做多，4h 做空）
- . 震荡区间（无明确方向）
- . 量能不足（突破无量）
- . 价格在均值附近徘徊（无左侧结构优势）
- . 无法提供合理止损位置
- . 风险大于收益
-
+【【观望的必要条件】
+以下任意情况必须观望：
+. 多周期信号分歧
+. 典型震荡结构
+. 量能不足（无效突破）
+. 价格靠近均值（无方向）
+. 找不到合理止损位
+. 风险大于收益
+. 噪音太多（30m极易被5m波动干扰）
 --------
 
 【输出要求（非常重要）】
@@ -728,10 +639,10 @@ ${llmControlEnabled ? `--------
 
 你不追求频繁交易，而是追求 高质量交易。
 --------
-	`;
+`;
 }
 
-export function createLowFrequencyAgent(intervalMinutes = 60) {
+export function createMidFrequencyAgent(intervalMinutes = 60) {
 	const openai = createOpenAI({
 		apiKey: process.env.OPENAI_API_KEY || "",
 		baseURL: process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1",
@@ -739,16 +650,21 @@ export function createLowFrequencyAgent(intervalMinutes = 60) {
 
 	const memory = new Memory({
 		storage: new LibSQLMemoryAdapter({
-			url: "file:./.voltagent/low-frequency-memory.db",
+			url: "file:./.voltagent/mid-frequency-memory.db",
 			logger: logger.child({ component: "libsql" }),
 		}),
 	});
 
-	//const systemPrompt = loadTemplate(DEFAULT_SYSTEM_TEMPLATE_PATH);
+	const templatePath =
+		process.env.MID_FREQ_SYSTEM_TEMPLATE_PATH?.trim() ||
+		DEFAULT_SYSTEM_TEMPLATE_PATH;
+	const useCustomTemplate =
+		Boolean(process.env.MID_FREQ_SYSTEM_TEMPLATE_PATH) &&
+		templatePath.length > 0;
 	const systemPrompt = getSystemPrompt(intervalMinutes);
-	//logger.info(systemPrompt);
+	//logger.info(systemPrompt)
 	const agent = new Agent({
-		name: "low-frequency-agent",
+		name: "mid-frequency-agent",
 		instructions: systemPrompt,
 		model: openai.chat(
 			process.env.AI_MODEL_NAME || "deepseek/deepseek-v3.2-exp",
@@ -760,13 +676,12 @@ export function createLowFrequencyAgent(intervalMinutes = 60) {
 			tradingTools.getPositionsTool,
 			tradingTools.openPositionTool,
 			tradingTools.closePositionTool,
-			tradingTools.setDefenseLevelsTool,
 			tradingTools.setNextTradingCycleIntervalTool,
 		],
 		memory,
 	});
 
-	logger.info(`低频交易 Agent 已初始化（调度周期 ${intervalMinutes} 分钟）。`);
+	logger.info(`中频交易 Agent 已初始化（调度周期 ${intervalMinutes} 分钟）。`);
 
 	return agent;
 }

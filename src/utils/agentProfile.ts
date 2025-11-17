@@ -12,6 +12,12 @@ export const LOW_FREQUENCY_PROFILE_ALIASES = [
 	"swing-agent",
 ];
 
+export const MID_FREQUENCY_PROFILE_ALIASES = [
+	"mid-frequency",
+	"midfreq",
+	"mid-frequency-agent",
+];
+
 export const NAKED_K_PROFILE_ALIASES = [
 	"naked-k",
 	"nakedk",
@@ -57,5 +63,12 @@ export function isLowFrequencyAgentProfile(raw?: string | null): boolean {
 	return profileMatches(
 		normalizeAgentProfile(raw),
 		LOW_FREQUENCY_PROFILE_ALIASES,
+	);
+}
+
+export function isMidFrequencyAgentProfile(raw?: string | null): boolean {
+	return profileMatches(
+		normalizeAgentProfile(raw),
+		MID_FREQUENCY_PROFILE_ALIASES,
 	);
 }

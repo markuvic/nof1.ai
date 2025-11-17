@@ -32,7 +32,10 @@ function parseInteger(value: string | undefined, fallback: number): number {
 	return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
+function parseBoolean(
+	value: string | undefined,
+	defaultValue: boolean,
+): boolean {
 	if (value === undefined) {
 		return defaultValue;
 	}

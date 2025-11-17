@@ -1,18 +1,25 @@
 import { Hono } from "hono";
 import {
-  addNode,
-  getStoredNodes,
-  removeNode,
-  cleanBaseUrl,
-  reorderNodes,
-} from "./nodeStore";
-import {
   buildOverview,
   fetchWithTimeout,
   invalidateOverviewCache,
 } from "./multiTraderService";
+import {
+  addNode,
+  cleanBaseUrl,
+  getStoredNodes,
+  removeNode,
+  reorderNodes,
+} from "./nodeStore";
 
 const router = new Hono();
+
+function extractErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
 
 router.get("/nodes", async (c) => {
   const nodes = await getStoredNodes();
@@ -25,8 +32,8 @@ router.post("/nodes", async (c) => {
     const node = await addNode(body.baseUrl, body.customName);
     invalidateOverviewCache();
     return c.json(node, 201);
-  } catch (error: any) {
-    return c.json({ error: error?.message || "添加节点失败" }, 400);
+  } catch (error) {
+    return c.json({ error: extractErrorMessage(error, "添加节点失败") }, 400);
   }
 });
 
@@ -39,8 +46,8 @@ router.post("/nodes/reorder", async (c) => {
     const nodes = await reorderNodes(body.ids);
     invalidateOverviewCache();
     return c.json({ nodes });
-  } catch (error: any) {
-    return c.json({ error: error?.message || "排序失败" }, 400);
+  } catch (error) {
+    return c.json({ error: extractErrorMessage(error, "排序失败") }, 400);
   }
 });
 
@@ -57,8 +64,11 @@ router.post("/nodes/test", async (c) => {
     const baseUrl = cleanBaseUrl(body.baseUrl);
     const meta = await fetchWithTimeout(`${baseUrl}/api/trader/meta`);
     return c.json({ ok: true, baseUrl, meta });
-  } catch (error: any) {
-    return c.json({ ok: false, error: error?.message || "连接失败" }, 400);
+  } catch (error) {
+    return c.json(
+      { ok: false, error: extractErrorMessage(error, "连接失败") },
+      400,
+    );
   }
 });
 
@@ -81,8 +91,11 @@ router.get("/overview", async (c) => {
   try {
     const overview = await buildOverview(nodes);
     return c.json(overview);
-  } catch (error: any) {
-    return c.json({ error: error?.message || "获取概要失败" }, 500);
+  } catch (error) {
+    return c.json(
+      { error: extractErrorMessage(error, "获取概要失败") },
+      500,
+    );
   }
 });
 

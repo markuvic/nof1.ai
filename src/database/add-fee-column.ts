@@ -45,7 +45,11 @@ async function addFeeColumn() {
       args: [],
     });
     
-    const hasFeeColumn = tableInfo.rows.some((row: any) => row.name === 'fee');
+    const hasFeeColumn = tableInfo.rows.some((row) => {
+      const columnName =
+        typeof row.name === "string" ? row.name : String(row.name ?? "");
+      return columnName === "fee";
+    });
     
     if (hasFeeColumn) {
       logger.info("✅ fee字段已存在，无需添加");
@@ -75,11 +79,11 @@ async function addFeeColumn() {
     logger.info("\n✅ 数据库迁移完成！");
     
     process.exit(0);
-  } catch (error: any) {
-    logger.error(`❌ 迁移失败: ${error.message}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`❌ 迁移失败: ${message}`);
     process.exit(1);
   }
 }
 
 addFeeColumn();
-

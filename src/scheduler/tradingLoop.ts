@@ -30,6 +30,10 @@ import {
   createLowFrequencyAgent,
   generateLowFrequencyPrompt,
 } from "../agents/lowFrequencyAgent";
+import {
+  createMidFrequencyAgent,
+  generateMidFrequencyPrompt,
+} from "../agents/midFrequencyAgent";
 import type { DefenseBreachContext } from "../agents/lowFrequencyAgent";
 import {
   createExchangeClient,
@@ -39,6 +43,8 @@ import {
 import { collectNakedKData } from "../services/marketData/nakedKCollector";
 import { collectLowFrequencyMarketDataset } from "../services/lowFrequencyAgent/dataCollector";
 import type { LowFrequencyMarketDataset } from "../services/lowFrequencyAgent/dataCollector";
+import { collectMidFrequencyMarketDataset } from "../services/midFrequencyAgent/dataCollector";
+import type { MidFrequencyMarketDataset } from "../services/midFrequencyAgent/dataCollector";
 import { buildHybridContext, type HybridContext } from "../services/hybridContext";
 import { generateQuantReports } from "../services/quantReport";
 import type { QuantReport } from "../services/quantReport/types";
@@ -66,6 +72,7 @@ import {
 import type { DefenseLevelType } from "../services/lowFrequencyAgent/defenseLevels";
 import {
   LOW_FREQUENCY_PROFILE_ALIASES,
+  MID_FREQUENCY_PROFILE_ALIASES,
   NAKED_K_PROFILE_ALIASES,
   HYBRID_PROFILE_ALIASES,
   QUANT_HYBRID_PROFILE_ALIASES,
@@ -2011,6 +2018,7 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
   const agentProfileRaw = process.env.AI_AGENT_PROFILE || "default";
   const normalizedProfile = normalizeAgentProfile(agentProfileRaw);
   const useNakedKAgent = NAKED_K_PROFILE_ALIASES.includes(normalizedProfile);
+  const useMidFrequencyAgent = MID_FREQUENCY_PROFILE_ALIASES.includes(normalizedProfile);
   const useLowFrequencyAgent = LOW_FREQUENCY_PROFILE_ALIASES.includes(normalizedProfile);
   const useHybridAgent = HYBRID_PROFILE_ALIASES.includes(normalizedProfile);
   const useQuantHybridAgent = QUANT_HYBRID_PROFILE_ALIASES.includes(normalizedProfile);
@@ -2024,7 +2032,8 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
   let marketData: any = {};
   let nakedKData: any = null;
   let hybridContext: HybridContext | null = null;
-  let lowFrequencyDataset: LowFrequencyMarketDataset | null = null;
+let lowFrequencyDataset: LowFrequencyMarketDataset | null = null;
+let midFrequencyDataset: MidFrequencyMarketDataset | null = null;
   let accountInfo: any = null;
   let positions: any[] = [];
   let quantReports: QuantReport[] | undefined;
@@ -2063,6 +2072,17 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
         }
       } catch (error) {
         logger.error("收集裸K 数据失败:", error as any);
+        return;
+      }
+    } else if (useMidFrequencyAgent) {
+      try {
+        midFrequencyDataset = await collectMidFrequencyMarketDataset(SYMBOLS);
+        if (!midFrequencyDataset || midFrequencyDataset.symbols.length === 0) {
+          logger.error("中频 Agent 数据为空，跳过本次循环");
+          return;
+        }
+      } catch (error) {
+        logger.error("收集中频 Agent 数据失败:", error as any);
         return;
       }
     } else if (useLowFrequencyAgent) {
@@ -2401,7 +2421,9 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
       ? hybridContext && Object.keys(hybridContext.snapshots || {}).length > 0
       : useNakedKAgent
         ? nakedKData && Object.keys(nakedKData).length > 0
-        : useLowFrequencyAgent
+        : useMidFrequencyAgent
+          ? midFrequencyDataset && (midFrequencyDataset.symbols?.length ?? 0) > 0
+          : useLowFrequencyAgent
           ? lowFrequencyDataset && (lowFrequencyDataset.symbols?.length ?? 0) > 0
           : marketData && Object.keys(marketData).length > 0;
     const dataValid =
@@ -2416,9 +2438,11 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
         `数据详情 -> ${
           useNakedKAgent
             ? `裸K数据: ${Object.keys(nakedKData || {}).length}`
-            : useLowFrequencyAgent
-              ? `低频数据: ${lowFrequencyDataset?.symbols?.length ?? 0}`
-              : `市场数据: ${Object.keys(marketData || {}).length}`
+            : useMidFrequencyAgent
+              ? `中频数据: ${midFrequencyDataset?.symbols?.length ?? 0}`
+              : useLowFrequencyAgent
+                ? `低频数据: ${lowFrequencyDataset?.symbols?.length ?? 0}`
+                : `市场数据: ${Object.keys(marketData || {}).length}`
         }, 账户: ${accountInfo?.totalBalance}, 持仓: ${positions.length}`,
       );
       return;
@@ -2490,6 +2514,17 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
             triggerReason: trigger,
             marketPulseEvent,
           })
+        : useMidFrequencyAgent
+        ? generateMidFrequencyPrompt({
+            accountInfo,
+            positions,
+            dataset: midFrequencyDataset!,
+            iteration: iterationCount,
+            minutesElapsed,
+            intervalMinutes,
+            triggerReason: trigger,
+            marketPulseEvent,
+          })
         : useLowFrequencyAgent
         ? generateLowFrequencyPrompt({
             accountInfo,
@@ -2529,9 +2564,11 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
           : createHybridAutonomousAgent(intervalMinutes)))
       : useNakedKAgent
         ? createNakedKAgent(intervalMinutes)
-        : useLowFrequencyAgent
-          ? createLowFrequencyAgent(intervalMinutes)
-          : createTradingAgent(intervalMinutes);
+        : useMidFrequencyAgent
+          ? createMidFrequencyAgent(intervalMinutes)
+          : useLowFrequencyAgent
+            ? createLowFrequencyAgent(intervalMinutes)
+            : createTradingAgent(intervalMinutes);
     
     try {
       // 设置足够大的 maxOutputTokens 以避免输出被截断

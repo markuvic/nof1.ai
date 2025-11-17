@@ -1,4 +1,4 @@
-import { MultiTraderNode } from "./nodeStore";
+import type { MultiTraderNode } from "./nodeStore";
 
 type TraderMeta = {
   traderName: string;
@@ -58,7 +58,7 @@ const CACHE_TTL_MS = Number.parseInt(
   10,
 );
 
-export async function fetchWithTimeout(url: string) {
+export async function fetchWithTimeout<T = unknown>(url: string): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -66,7 +66,7 @@ export async function fetchWithTimeout(url: string) {
     if (!response.ok) {
       throw new Error(`${response.status} ${response.statusText}`);
     }
-    return (await response.json()) as Record<string, any>;
+    return (await response.json()) as T;
   } finally {
     clearTimeout(timeout);
   }
@@ -90,7 +90,7 @@ async function fetchNodeData(node: MultiTraderNode) {
   return { account: accountValue, meta: metaValue, error };
 }
 
-function toNumber(value: any, fallback = 0) {
+function toNumber(value: unknown, fallback = 0) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
@@ -137,6 +137,13 @@ let cache: {
   data: DashboardOverview;
 } | null = null;
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export async function buildOverview(nodes: MultiTraderNode[]) {
   const key = nodes.map((node) => `${node.id}:${node.baseUrl}`).join("|");
   const now = Date.now();
@@ -167,14 +174,14 @@ export async function buildOverview(nodes: MultiTraderNode[]) {
           meta: meta as TraderMeta | null,
           account: account as TraderAccount,
         } satisfies NodeSnapshot;
-      } catch (error: any) {
+      } catch (error) {
         return {
           node,
           status: "offline" as const,
           lastSync: null,
           account: null,
           meta: null,
-          error: error?.message || "节点请求失败",
+          error: getErrorMessage(error, "节点请求失败"),
         } satisfies NodeSnapshot;
       }
     }),

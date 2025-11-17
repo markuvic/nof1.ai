@@ -1,6 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 
 export type MultiTraderNode = {
   id: string;
@@ -13,16 +13,17 @@ const DATA_DIR = path.resolve(process.cwd(), ".voltagent");
 const STORE_PATH = path.join(DATA_DIR, "multi-trader-nodes.json");
 
 async function ensureStoreFile() {
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.access(STORE_PATH);
-  } catch (error: any) {
-    if (error?.code === "ENOENT") {
-      await fs.writeFile(STORE_PATH, "[]", "utf8");
-      return;
-    }
-    throw error;
-  }
+	try {
+		await fs.mkdir(DATA_DIR, { recursive: true });
+		await fs.access(STORE_PATH);
+	} catch (error) {
+		const err = error as NodeJS.ErrnoException;
+		if (err?.code === "ENOENT") {
+			await fs.writeFile(STORE_PATH, "[]", "utf8");
+			return;
+		}
+		throw error;
+	}
 }
 
 function normalizeBaseUrl(rawUrl: string) {
@@ -94,7 +95,7 @@ export async function reorderNodes(ids: string[]) {
   for (const id of ids) {
     const found = map.get(id);
     if (!found) {
-      throw new Error("存在未知的节点 ID" );
+      throw new Error("存在未知的节点 ID");
     }
     reordered.push(found);
   }

@@ -6,6 +6,6 @@ import { createHybridAutonomousAgent } from "./hybridAutonomousAgent";
  * 注入最新的量化技术报告（指标/形态/趋势 + 决策），从而让 Agent 在同一套指令下
  * 具备额外的多代理洞察。
  */
-export function createQuantSignalAgent(intervalMinutes: number = 5) {
-  return createHybridAutonomousAgent(intervalMinutes);
+export function createQuantSignalAgent(intervalMinutes = 5) {
+	return createHybridAutonomousAgent(intervalMinutes);
 }

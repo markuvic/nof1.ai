@@ -410,16 +410,29 @@ export class GateExchangeClient implements ExchangeClient {
   }
 
   /**
-   * 获取资金费率
+   * 获取资金费率历史
    */
-  async getFundingRate(contract: string) {
+  async getFundingRateHistory(contract: string, limit: number = 8) {
     try {
       const result = await this.futuresApi.listFuturesFundingRateHistory(
         this.settle,
         contract,
-        { limit: 1 }
+        { limit },
       );
-      return result.body[0];
+      return result.body;
+    } catch (error) {
+      logger.error(`获取 ${contract} 资金费率历史失败:`, error as any);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取最新资金费率
+   */
+  async getFundingRate(contract: string) {
+    try {
+      const history = await this.getFundingRateHistory(contract, 1);
+      return history[0];
     } catch (error) {
       logger.error(`获取 ${contract} 资金费率失败:`, error as any);
       throw error;

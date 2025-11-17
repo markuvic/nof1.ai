@@ -687,6 +687,9 @@ export function createBinanceDryRunExchangeClient(): ExchangeClient {
     async getFundingRate(contract: string) {
       return marketClient.getFundingRate(contract);
     },
+    async getFundingRateHistory(contract: string, limit?: number) {
+      return marketClient.getFundingRateHistory(contract, limit ?? 8);
+    },
     async getContractInfo(contract: string) {
       return marketClient.getContractInfo(contract);
     },

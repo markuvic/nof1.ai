@@ -27,6 +27,7 @@ export interface ExchangeClient {
   getOpenOrders(contract?: string): Promise<any>;
   setLeverage(contract: string, leverage: number): Promise<any>;
   getFundingRate(contract: string): Promise<any>;
+  getFundingRateHistory(contract: string, limit?: number): Promise<any>;
   getContractInfo(contract: string): Promise<any>;
   getAllContracts(): Promise<any>;
   getOrderBook(contract: string, limit?: number): Promise<any>;

@@ -351,6 +351,8 @@ open-nof1.ai/
 
 > When `AI_AGENT_PROFILE=low-frequency`, the LLM can call `setDefenseLevels` to submit `entry_invalidation` and `structure_invalidation`. The runtime monitors these levels at the configured cadence and, once breached, forces a fresh LLM decision while injecting an alert that the system-level defense line has been broken.
 
+> When `AI_AGENT_PROFILE=mid-frequency`, the agent receives a mid-frequency dataset (5m/15m/1h/4h naked candles with fixed lengths, volume snapshots, ATR, RSI, MACD, funding-rate now/8h average, and bid/ask strength) to support medium-pace structure hunting.
+
 ### AI Model Configuration
 
 The system supports any OpenAI API compatible provider:

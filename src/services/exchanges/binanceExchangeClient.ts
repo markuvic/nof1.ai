@@ -818,13 +818,18 @@ export class BinanceExchangeClient implements ExchangeClient {
     });
   }
 
-  async getFundingRate(contract: string) {
+  async getFundingRateHistory(contract: string, limit: number = 8) {
     const symbol = toSymbol(contract);
     const data = await this.request<any[]>({
       path: "/fapi/v1/fundingRate",
-      params: { symbol, limit: 1 },
+      params: { symbol, limit },
     });
-    return data[0] ?? null;
+    return data;
+  }
+
+  async getFundingRate(contract: string) {
+    const history = await this.getFundingRateHistory(contract, 1);
+    return history[0] ?? null;
   }
 
   async getContractInfo(contract: string) {

@@ -332,6 +332,8 @@ open-nof1.ai/
 
 > **低频 Agent 防守点位说明**：当 `AI_AGENT_PROFILE=low-frequency` 且开启监控时，LLM 可通过 `setDefenseLevels` 工具为每个仓位设置 `entry_invalidation` 与 `structure_invalidation`。系统会按配置的间隔检查最新行情，若点位被突破将强制触发一次 LLM 决策，并在提示词中注入“系统级防守点位已被突破”的提醒。
 
+> **中频 Agent 数据说明**：将 `AI_AGENT_PROFILE=mid-frequency` 可启用中频交易 Agent，系统会为每个交易对提供 5m/15m/1h/4h 裸K（指定根数）、成交量快照、ATR、RSI、MACD、资金费率（含 8h 均值）以及订单簿多空强弱，方便 LLM 在中速节奏中捕捉结构机会。
+
 ### 交易策略说明
 
 系统支持5种交易策略，适应不同的市场环境和风险偏好：
