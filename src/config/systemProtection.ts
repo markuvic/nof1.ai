@@ -52,19 +52,26 @@ function parseTrailingTiers(raw?: string): Array<{
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0)
     .map((entry) => {
-      const [triggerStr, lockStr, closeStr] = entry.split(":").map((part) => part.trim());
+      const [triggerStr, lockStr, closeStr] = entry
+        .split(":")
+        .map((part) => part.trim());
       const trigger = Number.parseFloat(triggerStr ?? "");
-      const lock = Number.parseFloat(lockStr ?? "");
+      if (!Number.isFinite(trigger) || trigger <= 0) {
+        return null;
+      }
+      const lockValue = Number.parseFloat(lockStr ?? "");
+      const lock = Number.isFinite(lockValue) ? lockValue : trigger / 2;
+      const closeValue = Number.parseFloat(closeStr ?? "");
       const closePercent = clampPercent(
-        Number.parseFloat(closeStr ?? "100"),
+        Number.isFinite(closeValue) ? closeValue : 100,
       );
       return {
-        trigger: Number.isFinite(trigger) ? trigger : 0,
-        lock: Number.isFinite(lock) ? lock : trigger / 2,
+        trigger,
+        lock,
         closePercent,
       };
     })
-    .filter((tier) => tier.trigger > 0);
+    .filter((tier): tier is { trigger: number; lock: number; closePercent: number } => Boolean(tier));
   tiers.sort((a, b) => a.trigger - b.trigger);
   return tiers;
 }

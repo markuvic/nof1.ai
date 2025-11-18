@@ -334,6 +334,8 @@ open-nof1.ai/
 
 > **中频 Agent 数据说明**：将 `AI_AGENT_PROFILE=mid-frequency` 可启用中频交易 Agent，系统会为每个交易对提供 5m/15m/1h/4h 裸K（指定根数）、成交量快照、ATR、RSI、MACD、资金费率（含 8h 均值）以及订单簿多空强弱，方便 LLM 在中速节奏中捕捉结构机会。
 
+> **4 小时低频 Agent 数据说明**：将 `AI_AGENT_PROFILE=four-hour`（或 `4h-low-frequency` 等别名）启用 4h 低频 Agent。提示词会填充 30m/4h/1d 裸K（分别 60/90/60 根）及对应 EMA20/EMA50、MACD、RSI14、成交量均值，搭配资金费率与订单簿强弱，便于长周期结构判断。
+
 ### 交易策略说明
 
 系统支持5种交易策略，适应不同的市场环境和风险偏好：

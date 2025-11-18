@@ -353,6 +353,8 @@ open-nof1.ai/
 
 > When `AI_AGENT_PROFILE=mid-frequency`, the agent receives a mid-frequency dataset (5m/15m/1h/4h naked candles with fixed lengths, volume snapshots, ATR, RSI, MACD, funding-rate now/8h average, and bid/ask strength) to support medium-pace structure hunting.
 
+> When `AI_AGENT_PROFILE=four-hour` (aliases: `4h-low-frequency`, `four-hour-agent`, etc.), the system switches to the 4-hour low-frequency agent. Its prompt fills 30m/4h/1d naked candles (60/90/60 bars) with EMA20/EMA50, MACD, RSI14, 20-bar volume averages, funding-rate snapshots, and order-book strength so the LLM can reason on slower swing cycles.
+
 ### AI Model Configuration
 
 The system supports any OpenAI API compatible provider:

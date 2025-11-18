@@ -18,6 +18,14 @@ export const MID_FREQUENCY_PROFILE_ALIASES = [
 	"mid-frequency-agent",
 ];
 
+export const FOUR_HOUR_PROFILE_ALIASES = [
+	"four-hour",
+	"four-hour-agent",
+	"4h-low-frequency",
+	"low-frequency-4h",
+	"four-hour-low-frequency",
+];
+
 export const NAKED_K_PROFILE_ALIASES = [
 	"naked-k",
 	"nakedk",
@@ -70,5 +78,12 @@ export function isMidFrequencyAgentProfile(raw?: string | null): boolean {
 	return profileMatches(
 		normalizeAgentProfile(raw),
 		MID_FREQUENCY_PROFILE_ALIASES,
+	);
+}
+
+export function isFourHourAgentProfile(raw?: string | null): boolean {
+	return profileMatches(
+		normalizeAgentProfile(raw),
+		FOUR_HOUR_PROFILE_ALIASES,
 	);
 }

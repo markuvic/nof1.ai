@@ -31,6 +31,10 @@ import {
   generateLowFrequencyPrompt,
 } from "../agents/lowFrequencyAgent";
 import {
+  createFourHourAgent,
+  generateFourHourPrompt,
+} from "../agents/fourHourAgent";
+import {
   createMidFrequencyAgent,
   generateMidFrequencyPrompt,
 } from "../agents/midFrequencyAgent";
@@ -43,6 +47,8 @@ import {
 import { collectNakedKData } from "../services/marketData/nakedKCollector";
 import { collectLowFrequencyMarketDataset } from "../services/lowFrequencyAgent/dataCollector";
 import type { LowFrequencyMarketDataset } from "../services/lowFrequencyAgent/dataCollector";
+import { collectFourHourMarketDataset } from "../services/fourHourAgent/dataCollector";
+import type { FourHourMarketDataset } from "../services/fourHourAgent/dataCollector";
 import { collectMidFrequencyMarketDataset } from "../services/midFrequencyAgent/dataCollector";
 import type { MidFrequencyMarketDataset } from "../services/midFrequencyAgent/dataCollector";
 import { buildHybridContext, type HybridContext } from "../services/hybridContext";
@@ -72,6 +78,7 @@ import {
 import type { DefenseLevelType } from "../services/lowFrequencyAgent/defenseLevels";
 import {
   LOW_FREQUENCY_PROFILE_ALIASES,
+  FOUR_HOUR_PROFILE_ALIASES,
   MID_FREQUENCY_PROFILE_ALIASES,
   NAKED_K_PROFILE_ALIASES,
   HYBRID_PROFILE_ALIASES,
@@ -79,6 +86,7 @@ import {
   QUANT_HYBRID_NO_IMAGE_ALIASES,
   normalizeAgentProfile,
   isLowFrequencyAgentProfile,
+  isFourHourAgentProfile,
 } from "../utils/agentProfile";
 
 const logger = createPinoLogger({
@@ -113,6 +121,9 @@ let skipNextAutoSchedule = false;
 let defenseMonitorTimer: NodeJS.Timeout | null = null;
 let defenseMonitorExecuting = false;
 let lastDefenseDecisionAt = 0;
+let lowFrequencyDataset: LowFrequencyMarketDataset | null = null;
+let midFrequencyDataset: MidFrequencyMarketDataset | null = null;
+let fourHourDataset: FourHourMarketDataset | null = null;
 
 interface TradingDecisionOptions {
   trigger?: "scheduled" | "market-pulse" | "defense-breach";
@@ -158,12 +169,11 @@ function calculateAlignedNextRunTimestamp(intervalMinutes: number): number {
   const now = new Date();
   const next = new Date(now.getTime());
   next.setSeconds(0, 0);
-  let minutes = next.getMinutes();
-  const remainder = minutes % intervalMinutes;
-  const minutesToAdd = remainder === 0
-    ? intervalMinutes
-    : intervalMinutes - remainder;
-  next.setMinutes(minutes + minutesToAdd);
+  const minutesOfDay = next.getHours() * 60 + next.getMinutes();
+  const remainder = minutesOfDay % intervalMinutes;
+  const minutesToAdd =
+    remainder === 0 ? intervalMinutes : intervalMinutes - remainder;
+  next.setMinutes(next.getMinutes() + minutesToAdd);
   return next.getTime();
 }
 
@@ -1206,7 +1216,11 @@ async function performSystemProtection() {
         }
         if (level > 0) {
           const activeTier = trailingTiers[level - 1];
-          if (pnlPercent <= activeTier.lock) {
+          if (!activeTier) {
+            logger.warn(
+              `系统移动止盈配置缺失：未找到第 ${level} 档参数，跳过 ${symbol} 的移动止盈触发。`,
+            );
+          } else if (pnlPercent <= activeTier.lock) {
             const percentage = Math.min(
               100,
               Math.max(1, Math.round(activeTier.closePercent)),
@@ -1544,7 +1558,10 @@ async function runLowFrequencyDefenseMonitor() {
   if (!lowFrequencyDefenseConfig.monitoringEnabled) {
     return;
   }
-  if (!isLowFrequencyAgentProfile(process.env.AI_AGENT_PROFILE)) {
+  if (
+    !isLowFrequencyAgentProfile(process.env.AI_AGENT_PROFILE) &&
+    !isFourHourAgentProfile(process.env.AI_AGENT_PROFILE)
+  ) {
     return;
   }
   if (defenseMonitorExecuting) {
@@ -1662,7 +1679,10 @@ function startLowFrequencyDefenseMonitor() {
     logger.info("低频防守点位监控未启用。");
     return;
   }
-  if (!isLowFrequencyAgentProfile(process.env.AI_AGENT_PROFILE)) {
+  if (
+    !isLowFrequencyAgentProfile(process.env.AI_AGENT_PROFILE) &&
+    !isFourHourAgentProfile(process.env.AI_AGENT_PROFILE)
+  ) {
     logger.info("当前 Agent 非低频模式，跳过防守点位监控。");
     return;
   }
@@ -1980,6 +2000,9 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
 
   const performCycle = async () => {
     iterationCount++;
+    lowFrequencyDataset = null;
+    midFrequencyDataset = null;
+    fourHourDataset = null;
     const minutesElapsed = Math.floor(
       (Date.now() - tradingStartTime.getTime()) / 60000,
     );
@@ -2019,6 +2042,7 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
   const normalizedProfile = normalizeAgentProfile(agentProfileRaw);
   const useNakedKAgent = NAKED_K_PROFILE_ALIASES.includes(normalizedProfile);
   const useMidFrequencyAgent = MID_FREQUENCY_PROFILE_ALIASES.includes(normalizedProfile);
+  const useFourHourAgent = FOUR_HOUR_PROFILE_ALIASES.includes(normalizedProfile);
   const useLowFrequencyAgent = LOW_FREQUENCY_PROFILE_ALIASES.includes(normalizedProfile);
   const useHybridAgent = HYBRID_PROFILE_ALIASES.includes(normalizedProfile);
   const useQuantHybridAgent = QUANT_HYBRID_PROFILE_ALIASES.includes(normalizedProfile);
@@ -2032,8 +2056,6 @@ async function executeTradingDecision(options: TradingDecisionOptions = {}) {
   let marketData: any = {};
   let nakedKData: any = null;
   let hybridContext: HybridContext | null = null;
-let lowFrequencyDataset: LowFrequencyMarketDataset | null = null;
-let midFrequencyDataset: MidFrequencyMarketDataset | null = null;
   let accountInfo: any = null;
   let positions: any[] = [];
   let quantReports: QuantReport[] | undefined;
@@ -2083,6 +2105,17 @@ let midFrequencyDataset: MidFrequencyMarketDataset | null = null;
         }
       } catch (error) {
         logger.error("收集中频 Agent 数据失败:", error as any);
+        return;
+      }
+    } else if (useFourHourAgent) {
+      try {
+        fourHourDataset = await collectFourHourMarketDataset(SYMBOLS);
+        if (!fourHourDataset || fourHourDataset.symbols.length === 0) {
+          logger.error("4 小时低频 Agent 数据为空，跳过本次循环");
+          return;
+        }
+      } catch (error) {
+        logger.error("收集 4 小时低频 Agent 数据失败:", error as any);
         return;
       }
     } else if (useLowFrequencyAgent) {
@@ -2423,8 +2456,10 @@ let midFrequencyDataset: MidFrequencyMarketDataset | null = null;
         ? nakedKData && Object.keys(nakedKData).length > 0
         : useMidFrequencyAgent
           ? midFrequencyDataset && (midFrequencyDataset.symbols?.length ?? 0) > 0
-          : useLowFrequencyAgent
-          ? lowFrequencyDataset && (lowFrequencyDataset.symbols?.length ?? 0) > 0
+          : useFourHourAgent
+            ? fourHourDataset && (fourHourDataset.symbols?.length ?? 0) > 0
+            : useLowFrequencyAgent
+              ? lowFrequencyDataset && (lowFrequencyDataset.symbols?.length ?? 0) > 0
           : marketData && Object.keys(marketData).length > 0;
     const dataValid =
       hasMarketDataset &&
@@ -2440,9 +2475,11 @@ let midFrequencyDataset: MidFrequencyMarketDataset | null = null;
             ? `裸K数据: ${Object.keys(nakedKData || {}).length}`
             : useMidFrequencyAgent
               ? `中频数据: ${midFrequencyDataset?.symbols?.length ?? 0}`
-              : useLowFrequencyAgent
-                ? `低频数据: ${lowFrequencyDataset?.symbols?.length ?? 0}`
-                : `市场数据: ${Object.keys(marketData || {}).length}`
+              : useFourHourAgent
+                ? `4小时数据: ${fourHourDataset?.symbols?.length ?? 0}`
+                : useLowFrequencyAgent
+                  ? `低频数据: ${lowFrequencyDataset?.symbols?.length ?? 0}`
+                  : `市场数据: ${Object.keys(marketData || {}).length}`
         }, 账户: ${accountInfo?.totalBalance}, 持仓: ${positions.length}`,
       );
       return;
@@ -2525,6 +2562,18 @@ let midFrequencyDataset: MidFrequencyMarketDataset | null = null;
             triggerReason: trigger,
             marketPulseEvent,
           })
+        : useFourHourAgent
+        ? generateFourHourPrompt({
+            accountInfo,
+            positions,
+            dataset: fourHourDataset!,
+            iteration: iterationCount,
+            minutesElapsed,
+            intervalMinutes,
+            triggerReason: trigger,
+            marketPulseEvent,
+            defenseBreachContext,
+          })
         : useLowFrequencyAgent
         ? generateLowFrequencyPrompt({
             accountInfo,
@@ -2566,9 +2615,11 @@ let midFrequencyDataset: MidFrequencyMarketDataset | null = null;
         ? createNakedKAgent(intervalMinutes)
         : useMidFrequencyAgent
           ? createMidFrequencyAgent(intervalMinutes)
-          : useLowFrequencyAgent
-            ? createLowFrequencyAgent(intervalMinutes)
-            : createTradingAgent(intervalMinutes);
+          : useFourHourAgent
+            ? createFourHourAgent(intervalMinutes)
+            : useLowFrequencyAgent
+              ? createLowFrequencyAgent(intervalMinutes)
+              : createTradingAgent(intervalMinutes);
     
     try {
       // 设置足够大的 maxOutputTokens 以避免输出被截断
